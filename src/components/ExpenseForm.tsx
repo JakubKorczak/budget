@@ -3,6 +3,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 
 import {
   Form,
@@ -76,14 +77,17 @@ const expenseFormSchema = z.object({
 
 type ExpenseFormValues = z.infer<typeof expenseFormSchema>;
 
-export function ExpenseForm() {
+interface ExpenseFormProps {
+  onLogout?: () => void;
+}
+
+export function ExpenseForm({ onLogout }: ExpenseFormProps) {
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const [isLoadingAmount, setIsLoadingAmount] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [currentMonth] = useState(getCurrentMonth());
-  const [successMessage, setSuccessMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [currentMonth] = useState(getCurrentMonth());
 
   const form = useForm<ExpenseFormValues>({
     resolver: zodResolver(expenseFormSchema),
@@ -169,7 +173,6 @@ export function ExpenseForm() {
 
   const onSubmit = async (data: ExpenseFormValues) => {
     setIsSubmitting(true);
-    setSuccessMessage("");
 
     try {
       await addExpense(
@@ -179,17 +182,16 @@ export function ExpenseForm() {
         currentMonth
       );
 
-      setSuccessMessage("Wydatek został dodany pomyślnie! ✓");
+      toast.success("Wydatek został dodany pomyślnie! ✓");
 
-      // Resetuj formularz po 2 sekundach
+      // Resetuj formularz po 1 sekundzie
       setTimeout(() => {
         form.reset({
           category: "",
           day: new Date().getDate().toString(),
           price: "",
         });
-        setSuccessMessage("");
-      }, 2000);
+      }, 1000);
     } catch (error) {
       console.error("Błąd podczas dodawania wydatku:", error);
 
@@ -199,7 +201,7 @@ export function ExpenseForm() {
           ? error.message
           : "Nie udało się dodać wydatku. Sprawdź konfigurację.";
 
-      alert(errorMessage);
+      toast.error(errorMessage);
     } finally {
       setIsSubmitting(false);
     }
@@ -209,13 +211,33 @@ export function ExpenseForm() {
   const dayOptions = Array.from({ length: 31 }, (_, i) => i + 1);
 
   return (
-    <Card className="w-full shadow-lg">
-      <CardHeader className="pb-3">
-        <CardTitle className="text-2xl">💸 Dodaj wydatek</CardTitle>
-        <CardDescription>
-          {currentMonth} {new Date().getFullYear()}
-        </CardDescription>
-      </CardHeader>
+    <>
+      {onLogout && (
+        <header className="mb-3">
+          <div className="flex items-center justify-between mb-2">
+            <h1 className="text-3xl font-bold bg-linear-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              💰 Budżet
+            </h1>
+            <button
+              onClick={onLogout}
+              className="text-sm text-gray-600 hover:text-gray-900 px-3 py-2 rounded-lg hover:bg-white/50 transition-all active:scale-95 touch-manipulation"
+              title="Wyloguj się"
+            >
+              🚪 Wyloguj
+            </button>
+          </div>
+          <p className="text-sm text-gray-600 text-center">
+            Zarządzaj wydatkami
+          </p>
+        </header>
+      )}
+      <Card className="w-full shadow-lg">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-2xl">💸 Dodaj wydatek</CardTitle>
+          <CardDescription>
+            {currentMonth} {new Date().getFullYear()}
+          </CardDescription>
+        </CardHeader>
       <CardContent className="pt-3">
         {errorMessage && (
           <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
@@ -365,17 +387,6 @@ export function ExpenseForm() {
                 )}
               />
 
-              {successMessage && (
-                <div className="p-4 bg-linear-to-r from-green-50 to-emerald-50 border-l-4 border-green-500 rounded-r-lg">
-                  <div className="flex items-center">
-                    <span className="text-green-500 text-2xl mr-3">✓</span>
-                    <p className="text-sm font-medium text-green-800">
-                      {successMessage}
-                    </p>
-                  </div>
-                </div>
-              )}
-
               <Button
                 type="submit"
                 className="w-full h-12 text-base font-semibold shadow-md hover:shadow-lg transition-all"
@@ -398,5 +409,6 @@ export function ExpenseForm() {
         )}
       </CardContent>
     </Card>
+    </>
   );
 }

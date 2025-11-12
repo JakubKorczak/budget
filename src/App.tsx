@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { Toaster, toast } from "sonner";
 import { ExpenseForm } from "./components/ExpenseForm";
 import { Login } from "./components/Login";
 import "./App.css";
@@ -14,30 +15,93 @@ function App() {
     return session === CORRECT_PASSWORD;
   });
 
+  // Pull to refresh - odśwież stronę przez przeciągnięcie w dół
+  useEffect(() => {
+    let startY = 0;
+    let isPulling = false;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      // Sprawdź czy scroll jest na samej górze
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      if (scrollTop === 0) {
+        startY = e.touches[0].clientY;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      const scrollTop = window.scrollY || document.documentElement.scrollTop;
+      if (scrollTop === 0) {
+        const currentY = e.touches[0].clientY;
+        const distance = currentY - startY;
+        
+        // Jeśli przeciągnięto w dół o więcej niż 80px
+        if (distance > 80 && !isPulling) {
+          isPulling = true;
+          toast.loading("Odświeżanie...", { id: "refresh" });
+        }
+      }
+    };
+
+    const handleTouchEnd = () => {
+      if (isPulling) {
+        setTimeout(() => {
+          window.location.reload();
+        }, 300);
+      }
+      isPulling = false;
+      startY = 0;
+    };
+
+    document.addEventListener("touchstart", handleTouchStart);
+    document.addEventListener("touchmove", handleTouchMove);
+    document.addEventListener("touchend", handleTouchEnd);
+
+    return () => {
+      document.removeEventListener("touchstart", handleTouchStart);
+      document.removeEventListener("touchmove", handleTouchMove);
+      document.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, []);
+
   const handleLogin = (password: string) => {
     if (password === CORRECT_PASSWORD) {
       setIsAuthenticated(true);
       // Zapisz sesję (działa tylko do zamknięcia przeglądarki)
       sessionStorage.setItem(SESSION_KEY, password);
+      toast.success("Zalogowano pomyślnie! 🎉");
     } else {
-      alert("❌ Nieprawidłowe hasło! Spróbuj ponownie.");
+      toast.error("Nieprawidłowe hasło! Spróbuj ponownie.");
     }
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    sessionStorage.removeItem(SESSION_KEY);
+    toast.info("Wylogowano");
   };
 
   // Ekran logowania
   if (!isAuthenticated) {
-    return <Login onLogin={handleLogin} />;
+    return (
+      <>
+        <Toaster position="top-center" richColors />
+        <Login onLogin={handleLogin} />
+      </>
+    );
   }
 
   // Główna aplikacja
   return (
-    <div className="flex items-center h-full overflow-y-auto bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50">
-      <div className="container mx-auto px-3 py-3 sm:px-4 sm:py-4 max-w-md">
-        <main>
-          <ExpenseForm />
-        </main>
+    <>
+      <Toaster position="top-center" richColors />
+      <div className="flex items-center h-full overflow-y-auto bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50">
+        <div className="container mx-auto px-3 py-3 sm:px-4 sm:py-4 max-w-md">
+          <main>
+            <ExpenseForm onLogout={handleLogout} />
+          </main>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
