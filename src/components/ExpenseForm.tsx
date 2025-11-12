@@ -335,7 +335,7 @@ export function ExpenseForm() {
                             <SelectValue placeholder="Wybierz dzień..." />
                           </SelectTrigger>
                         </FormControl>
-                        <SelectContent className="max-h-[250px]">
+                        <SelectContent className="max-h-80">
                           {dayOptions.map((day) => (
                             <SelectItem
                               key={day}
