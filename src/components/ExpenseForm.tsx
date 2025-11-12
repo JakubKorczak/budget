@@ -210,15 +210,15 @@ export function ExpenseForm() {
 
   return (
     <Card className="w-full shadow-lg">
-      <CardHeader>
+      <CardHeader className="pb-3">
         <CardTitle className="text-2xl">💸 Dodaj wydatek</CardTitle>
         <CardDescription>
           {currentMonth} {new Date().getFullYear()}
         </CardDescription>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pt-3">
         {errorMessage && (
-          <div className="mb-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
+          <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
             <div className="flex items-start">
               <span className="text-red-500 text-xl mr-3">⚠️</span>
               <div className="flex-1">
@@ -248,7 +248,7 @@ export function ExpenseForm() {
           </div>
         ) : (
           <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField
                 control={form.control}
                 name="category"

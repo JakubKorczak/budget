@@ -36,9 +36,9 @@ function App() {
 
   // Główna aplikacja
   return (
-    <div className="min-h-screen bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50">
+    <div className="h-screen overflow-auto bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50">
       <div className="container mx-auto px-3 py-4 sm:px-4 sm:py-6 max-w-md">
-        <header className="mb-6">
+        <header className="mb-4">
           <div className="flex items-center justify-between mb-2">
             <h1 className="text-3xl font-bold bg-linear-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               💰 Budżet
