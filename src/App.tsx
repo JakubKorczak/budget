@@ -36,25 +36,8 @@ function App() {
 
   // Główna aplikacja
   return (
-    <div className="h-full overflow-y-auto bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50">
+    <div className="flex items-center h-full overflow-y-auto bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50">
       <div className="container mx-auto px-3 py-3 sm:px-4 sm:py-4 max-w-md">
-        <header className="mb-3">
-          <div className="flex items-center justify-between mb-2">
-            <h1 className="text-3xl font-bold bg-linear-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              💰 Budżet
-            </h1>
-            <button
-              onClick={handleLogout}
-              className="text-sm text-gray-600 hover:text-gray-900 px-3 py-2 rounded-lg hover:bg-white/50 transition-all active:scale-95 touch-manipulation"
-              title="Wyloguj się"
-            >
-              🚪 Wyloguj
-            </button>
-          </div>
-          <p className="text-sm text-gray-600 text-center">
-            Zarządzaj wydatkami
-          </p>
-        </header>
         <main>
           <ExpenseForm />
         </main>

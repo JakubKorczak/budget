@@ -116,8 +116,8 @@ export async function getAmount(
     // Usuń spacje i zamień przecinek na kropkę przed parsowaniem
     // Google Sheets może zwracać: "1 000,50" lub "1,000.50"
     const cleanAmount =
-      typeof amount === "string" 
-        ? amount.replace(/\s/g, "").replace(/,/g, ".") 
+      typeof amount === "string"
+        ? amount.replace(/\s/g, "").replace(/,/g, ".")
         : amount;
     const numericAmount =
       typeof cleanAmount === "number"

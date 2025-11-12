@@ -2,7 +2,8 @@
 @import "tw-animate-css";
 
 /* Napraw wysokość viewport na iPhone */
-html, body {
+html,
+body {
   height: 100%;
   overflow: hidden;
 }
