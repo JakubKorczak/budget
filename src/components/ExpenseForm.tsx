@@ -364,7 +364,8 @@ export function ExpenseForm() {
                       <FormControl>
                         <div className="relative">
                           <Input
-                            type="tel"
+                            type="text"
+                            inputMode="decimal"
                             pattern="[0-9.,+\-*/()]*"
                             placeholder="0.00 lub 49.99+20"
                             {...field}

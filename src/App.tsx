@@ -24,9 +24,9 @@ const queryClient = new QueryClient({
 });
 
 function App() {
-  // Inicjalizuj state na podstawie sessionStorage
+  // Inicjalizuj state na podstawie localStorage
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    const session = sessionStorage.getItem(SESSION_KEY);
+    const session = localStorage.getItem(SESSION_KEY);
     return session === CORRECT_PASSWORD;
   });
 
@@ -81,8 +81,8 @@ function App() {
   const handleLogin = (password: string) => {
     if (password === CORRECT_PASSWORD) {
       setIsAuthenticated(true);
-      // Zapisz sesję (działa tylko do zamknięcia przeglądarki)
-      sessionStorage.setItem(SESSION_KEY, password);
+      // Zapisz sesję permanentnie w localStorage
+      localStorage.setItem(SESSION_KEY, password);
       toast.success("Zalogowano pomyślnie! 🎉");
     } else {
       toast.error("Nieprawidłowe hasło! Spróbuj ponownie.");
