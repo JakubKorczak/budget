@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation } from "@tanstack/react-query";
 import * as z from "zod";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -81,7 +82,6 @@ export function ExpenseForm() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const [isLoadingAmount, setIsLoadingAmount] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [currentMonth] = useState(getCurrentMonth());
 
@@ -91,6 +91,52 @@ export function ExpenseForm() {
       category: "",
       day: new Date().getDate().toString(),
       price: "",
+    },
+  });
+
+  // TanStack Query mutation dla dodawania wydatków
+  const addExpenseMutation = useMutation({
+    mutationFn: async (data: {
+      category: string;
+      day: number;
+      price: string;
+      month: string;
+    }) => {
+      return addExpense(data.category, data.day, data.price, data.month);
+    },
+    onMutate: async (variables) => {
+      // Optimistic update - natychmiastowy reset formularza (bez czekania na API)
+      form.reset({
+        category: "",
+        day: new Date().getDate().toString(),
+        price: "",
+      });
+
+      // Zwróć poprzednie dane na wypadek błędu (rollback)
+      return {
+        previousCategory: variables.category,
+        previousDay: variables.day.toString(),
+        previousPrice: variables.price,
+      };
+    },
+    onSuccess: () => {
+      toast.success("Wydatek dodany pomyślnie! ✓");
+    },
+    onError: (error: Error, _variables, context) => {
+      // Rollback - przywróć dane w razie błędu
+      if (context) {
+        form.setValue("category", context.previousCategory);
+        form.setValue("day", context.previousDay);
+        form.setValue("price", context.previousPrice);
+      }
+      toast.error(error.message || "Nie udało się dodać wydatku");
+    },
+    retry: 3,
+    retryDelay: (attemptIndex) => {
+      toast.loading(`Ponowna próba... (${attemptIndex + 1}/3)`, {
+        id: "retry",
+      });
+      return Math.min(1000 * 2 ** attemptIndex, 30000);
     },
   });
 
@@ -168,72 +214,12 @@ export function ExpenseForm() {
   }, [form, currentMonth]); // Reaguj TYLKO na kategorie i dzień!
 
   const onSubmit = async (data: ExpenseFormValues) => {
-    setIsSubmitting(true);
-
-    // Optimistic update - natychmiastowe działanie bez czekania na API
-    const categoryBackup = data.category;
-    const dayBackup = data.day;
-    const priceBackup = data.price;
-
-    // Pokaż sukces i zresetuj formularz natychmiast
-    toast.success("Dodawanie wydatku...");
-    form.reset({
-      category: "",
-      day: new Date().getDate().toString(),
-      price: "",
+    addExpenseMutation.mutate({
+      category: data.category,
+      day: parseInt(data.day),
+      price: data.price,
+      month: currentMonth,
     });
-    setIsSubmitting(false);
-
-    // Funkcja retry z exponential backoff
-    const retryWithBackoff = async (
-      fn: () => Promise<void>,
-      retries = 3,
-      delay = 1000
-    ): Promise<void> => {
-      try {
-        await fn();
-      } catch (error) {
-        if (retries === 0) {
-          throw error;
-        }
-        toast.loading(`Ponowna próba... (${4 - retries}/3)`, { id: "retry" });
-        await new Promise((resolve) => setTimeout(resolve, delay));
-        return retryWithBackoff(fn, retries - 1, delay * 2);
-      }
-    };
-
-    // Wyślij do API w tle z retry
-    try {
-      await retryWithBackoff(async () => {
-        await addExpense(
-          categoryBackup,
-          parseInt(dayBackup),
-          priceBackup,
-          currentMonth
-        );
-      });
-
-      // Zaktualizuj toast na sukces
-      toast.dismiss("retry");
-      toast.success("Wydatek dodany pomyślnie! ✓");
-    } catch (error) {
-      console.error("Błąd podczas dodawania wydatku:", error);
-
-      // Przywróć dane w razie błędu
-      form.setValue("category", categoryBackup);
-      form.setValue("day", dayBackup);
-      form.setValue("price", priceBackup);
-
-      // Wyświetl szczegółowy komunikat błędu
-      const errorMessage =
-        error instanceof Error
-          ? error.message
-          : "Nie udało się dodać wydatku po 3 próbach. Sprawdź konfigurację.";
-
-      toast.dismiss("retry");
-      toast.error(errorMessage);
-      setIsSubmitting(false);
-    }
   };
 
   // Generuj opcje dni (1-31)
@@ -302,7 +288,7 @@ export function ExpenseForm() {
                             <SelectValue placeholder="Wybierz kategorię..." />
                           </SelectTrigger>
                         </FormControl>
-                        <SelectContent className="max-h-[400px]">
+                        <SelectContent className="max-h-[250px]">
                           {categories.map((categoryGroup) => {
                             const categoryName = Object.keys(categoryGroup)[0];
                             const subcategories = categoryGroup[categoryName];
@@ -345,11 +331,11 @@ export function ExpenseForm() {
                         value={field.value}
                       >
                         <FormControl>
-                          <SelectTrigger className="h-12 text-base">
+                          <SelectTrigger className="h-10 text-base">
                             <SelectValue placeholder="Wybierz dzień..." />
                           </SelectTrigger>
                         </FormControl>
-                        <SelectContent className="max-h-[400px]">
+                        <SelectContent className="max-h-[250px]">
                           {dayOptions.map((day) => (
                             <SelectItem
                               key={day}
@@ -409,9 +395,9 @@ export function ExpenseForm() {
                 <Button
                   type="submit"
                   className="w-full h-12 text-base font-semibold shadow-md hover:shadow-lg transition-all"
-                  disabled={isSubmitting}
+                  disabled={addExpenseMutation.isPending}
                 >
-                  {isSubmitting ? (
+                  {addExpenseMutation.isPending ? (
                     <>
                       <Loader2 className="mr-2 h-5 w-5 animate-spin" />
                       Dodawanie...
