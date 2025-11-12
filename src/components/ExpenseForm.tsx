@@ -228,13 +228,13 @@ export function ExpenseForm() {
   return (
     <>
       <Card className="w-full shadow-lg">
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-4">
           <CardTitle className="text-2xl">💸 Dodaj wydatek</CardTitle>
           <CardDescription>
             {currentMonth} {new Date().getFullYear()}
           </CardDescription>
         </CardHeader>
-        <CardContent className="pt-3">
+        <CardContent className="pt-4">
           {errorMessage && (
             <div className="mb-4 p-3 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
               <div className="flex items-start">
@@ -268,7 +268,7 @@ export function ExpenseForm() {
             <Form {...form}>
               <form
                 onSubmit={form.handleSubmit(onSubmit)}
-                className="space-y-4"
+                className="space-y-6"
               >
                 <FormField
                   control={form.control}
@@ -392,11 +392,12 @@ export function ExpenseForm() {
                   )}
                 />
 
-                <Button
-                  type="submit"
-                  className="w-full h-12 text-base font-semibold shadow-md hover:shadow-lg transition-all"
-                  disabled={addExpenseMutation.isPending}
-                >
+                <div className="pt-2">
+                  <Button
+                    type="submit"
+                    className="w-full h-12 text-base font-semibold shadow-md hover:shadow-lg transition-all"
+                    disabled={addExpenseMutation.isPending}
+                  >
                   {addExpenseMutation.isPending ? (
                     <>
                       <Loader2 className="mr-2 h-5 w-5 animate-spin" />
@@ -409,6 +410,7 @@ export function ExpenseForm() {
                     </>
                   )}
                 </Button>
+                </div>
               </form>
             </Form>
           )}
