@@ -65,6 +65,22 @@ export async function getCategories(): Promise<Category[]> {
 }
 
 /**
+ * Konwertuje indeks kolumny (0-based) na nazwę kolumny Excel (A, B, ..., Z, AA, AB, ...)
+ * Przykład: 0 -> A, 25 -> Z, 26 -> AA, 27 -> AB
+ */
+function getColumnLetter(index: number): string {
+  let columnLetter = "";
+  let tempIndex = index;
+
+  while (tempIndex >= 0) {
+    columnLetter = String.fromCharCode((tempIndex % 26) + 65) + columnLetter;
+    tempIndex = Math.floor(tempIndex / 26) - 1;
+  }
+
+  return columnLetter;
+}
+
+/**
  * Pobiera aktualną wartość dla danej kategorii i dnia
  */
 export async function getAmount(
@@ -87,8 +103,10 @@ export async function getAmount(
       throw new Error("Kategoria nie znaleziona");
     }
 
-    // Obliczamy kolumnę na podstawie dnia (kolumna I = dzień 1, czyli indeks 9)
-    const dayColumnLetter = String.fromCharCode(72 + day); // H=72, I=73 (dzień 1)
+    // Obliczamy kolumnę na podstawie dnia
+    // Dzień 1 = kolumna I (indeks 8), dzień 2 = J (indeks 9), ..., dzień 19 = AA (indeks 26), itd.
+    const columnIndex = 8 + day; // I = 8 (dzień 1)
+    const dayColumnLetter = getColumnLetter(columnIndex);
     const valueRange = `${month}!${dayColumnLetter}${categoryRowIndex}`;
 
     const valueUrl = `${BASE_URL}/${SPREADSHEET_ID}/values/${valueRange}?key=${API_KEY}`;
