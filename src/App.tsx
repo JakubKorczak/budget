@@ -33,7 +33,7 @@ function App() {
       if (scrollTop === 0) {
         const currentY = e.touches[0].clientY;
         const distance = currentY - startY;
-        
+
         // Jeśli przeciągnięto w dół o więcej niż 80px
         if (distance > 80 && !isPulling) {
           isPulling = true;
