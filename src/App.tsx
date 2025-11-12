@@ -24,11 +24,6 @@ function App() {
     }
   };
 
-  const handleLogout = () => {
-    setIsAuthenticated(false);
-    sessionStorage.removeItem(SESSION_KEY);
-  };
-
   // Ekran logowania
   if (!isAuthenticated) {
     return <Login onLogin={handleLogin} />;
