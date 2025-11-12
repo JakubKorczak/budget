@@ -331,11 +331,11 @@ export function ExpenseForm() {
                         value={field.value}
                       >
                         <FormControl>
-                          <SelectTrigger className="h-10 text-base">
+                          <SelectTrigger className="h-12 text-base">
                             <SelectValue placeholder="Wybierz dzień..." />
                           </SelectTrigger>
                         </FormControl>
-                        <SelectContent className="max-h-80">
+                        <SelectContent className="max-h-88">
                           {dayOptions.map((day) => (
                             <SelectItem
                               key={day}

@@ -103,7 +103,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Toaster position="top-center" richColors />
-      <div className="flex items-center h-full overflow-y-auto bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50">
+      <div className="h-full overflow-y-auto bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50">
         <div className="container mx-auto px-3 py-3 sm:px-4 sm:py-4 max-w-md">
           <main>
             <ExpenseForm />
