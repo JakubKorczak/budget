@@ -105,7 +105,7 @@ export async function getAmount(
 
     // Obliczamy kolumnę na podstawie dnia
     // Dzień 1 = kolumna I (indeks 8), dzień 2 = J (indeks 9), ..., dzień 19 = AA (indeks 26), itd.
-    const columnIndex = 8 + day; // I = 8 (dzień 1)
+    const columnIndex = 8 + day - 1; // Dzień 1 -> indeks 8 (kolumna I)
     const dayColumnLetter = getColumnLetter(columnIndex);
     const valueRange = `${month}!${dayColumnLetter}${categoryRowIndex}`;
 
@@ -113,9 +113,12 @@ export async function getAmount(
     const valueResponse = await axios.get(valueUrl);
 
     const amount = valueResponse.data.values?.[0]?.[0] || 0;
-    // Zamień przecinek na kropkę przed parsowaniem (Google Sheets zwraca tekst z przecinkiem)
+    // Usuń spacje i zamień przecinek na kropkę przed parsowaniem
+    // Google Sheets może zwracać: "1 000,50" lub "1,000.50"
     const cleanAmount =
-      typeof amount === "string" ? amount.replace(/,/g, ".") : amount;
+      typeof amount === "string" 
+        ? amount.replace(/\s/g, "").replace(/,/g, ".") 
+        : amount;
     const numericAmount =
       typeof cleanAmount === "number"
         ? cleanAmount
