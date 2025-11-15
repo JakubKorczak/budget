@@ -300,7 +300,7 @@ export function ExpenseForm() {
                             <SelectValue placeholder="Wybierz kategorię..." />
                           </SelectTrigger>
                         </FormControl>
-                        <SelectContent className="max-h-[420px]">
+                        <SelectContent className="max-h-[420px] overscroll-contain">
                           {categories.map((categoryGroup) => {
                             const categoryName = Object.keys(categoryGroup)[0];
                             const subcategories = categoryGroup[categoryName];
@@ -347,7 +347,7 @@ export function ExpenseForm() {
                             <SelectValue placeholder="Wybierz dzień..." />
                           </SelectTrigger>
                         </FormControl>
-                        <SelectContent className="max-h-88">
+                        <SelectContent className="max-h-88 overscroll-contain">
                           {dayOptions.map((day) => (
                             <SelectItem
                               key={day}
