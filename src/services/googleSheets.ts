@@ -7,6 +7,19 @@ const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
 
 const BASE_URL = "https://sheets.googleapis.com/v4/spreadsheets";
 
+type SheetRowData = {
+  values?: Array<{ formattedValue?: string }>;
+};
+
+interface CategoryGridCacheEntry {
+  startRow: number;
+  rowData: SheetRowData[];
+  snapshot: Array<{ row: number; value: string | null }>;
+}
+
+const categoryGridCache = new Map<string, CategoryGridCacheEntry>();
+const categoryRowValuesCache = new Map<string, (string | number | null)[]>();
+
 /**
  * Pobiera kategorie z arkusza "Wzorzec kategorii"
  */
@@ -64,6 +77,83 @@ export async function getCategories(): Promise<Category[]> {
   }
 }
 
+async function getCategoryGrid(month: string): Promise<CategoryGridCacheEntry> {
+  const cached = categoryGridCache.get(month);
+  if (cached) {
+    return cached;
+  }
+
+  const categoriesRange = `${month}!B79:B257`;
+  const encodedRange = encodeURIComponent(categoriesRange);
+  const gridUrl = `${BASE_URL}/${SPREADSHEET_ID}?ranges=${encodedRange}&includeGridData=true&fields=sheets(properties(title),data(rowData(values(formattedValue))))&key=${API_KEY}`;
+
+  const response = await axios.get(gridUrl);
+  const sheetData = (response.data.sheets || []).find(
+    (sheet: { properties?: { title?: string } }) =>
+      sheet?.properties?.title === month
+  );
+  const gridData = sheetData?.data?.[0];
+  const rowData: SheetRowData[] = gridData?.rowData || [];
+
+  if (!sheetData || !rowData.length) {
+    throw new Error("Nie udało się pobrać kategorii dla wybranego miesiąca");
+  }
+
+  const startRowMatch = categoriesRange.match(/![A-Z]+(\d+)/i);
+  const startRow = startRowMatch ? parseInt(startRowMatch[1], 10) : 79;
+
+  const snapshot = rowData.map((row, idx) => ({
+    row: startRow + idx,
+    value: row?.values?.[0]?.formattedValue ?? null,
+  }));
+
+  console.log("[Sheets] Kategorie w zakresie", categoriesRange, snapshot);
+
+  const entry: CategoryGridCacheEntry = {
+    startRow,
+    rowData,
+    snapshot,
+  };
+  categoryGridCache.set(month, entry);
+  return entry;
+}
+
+function buildRowCacheKey(month: string, rowIndex: number) {
+  return `${month}:${rowIndex}`;
+}
+
+async function getCategoryRowValues(
+  month: string,
+  rowIndex: number
+): Promise<(string | number | null)[]> {
+  const cacheKey = buildRowCacheKey(month, rowIndex);
+  const cached = categoryRowValuesCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const dayColumns = 31;
+  const startColumnIndex = 8; // kolumna I
+  const endColumnIndex = startColumnIndex + dayColumns - 1; // kolumna dla dnia 31
+  const startColumn = getColumnLetter(startColumnIndex);
+  const endColumn = getColumnLetter(endColumnIndex);
+  const rowRange = `${month}!${startColumn}${rowIndex}:${endColumn}${rowIndex}`;
+  const url = `${BASE_URL}/${SPREADSHEET_ID}/values/${rowRange}?key=${API_KEY}`;
+  const response = await axios.get(url);
+  const values: (string | number | null)[] = response.data.values?.[0] || [];
+  categoryRowValuesCache.set(cacheKey, values);
+  return values;
+}
+
+function invalidateMonthCache(month: string) {
+  categoryGridCache.delete(month);
+  for (const key of categoryRowValuesCache.keys()) {
+    if (key.startsWith(`${month}:`)) {
+      categoryRowValuesCache.delete(key);
+    }
+  }
+}
+
 /**
  * Konwertuje indeks kolumny (0-based) na nazwę kolumny Excel (A, B, ..., Z, AA, AB, ...)
  * Przykład: 0 -> A, 25 -> Z, 26 -> AA, 27 -> AB
@@ -89,30 +179,25 @@ export async function getAmount(
   month: string
 ): Promise<number> {
   try {
-    // Najpierw pobieramy wszystkie kategorie z arkusza miesiąca
-    const categoriesRange = `${month}!B79:B257`;
-    const url = `${BASE_URL}/${SPREADSHEET_ID}/values/${categoriesRange}?key=${API_KEY}`;
+    const { rowData, startRow } = await getCategoryGrid(month);
+    const normalizedCategory = category.trim().toLowerCase();
 
-    const response = await axios.get(url);
-    const categoryValues = response.data.values?.flat() || [];
+    let categoryRowIndex = -1;
+    for (let i = 0; i < rowData.length; i++) {
+      const cellValue = rowData[i]?.values?.[0]?.formattedValue?.trim();
+      if (cellValue && cellValue.toLowerCase() === normalizedCategory) {
+        categoryRowIndex = startRow + i;
+        break;
+      }
+    }
 
-    // Znajdujemy wiersz kategorii
-    const categoryRowIndex = categoryValues.indexOf(category.trim()) + 79;
-
-    if (categoryRowIndex === 78) {
+    if (categoryRowIndex === -1) {
       throw new Error("Kategoria nie znaleziona");
     }
 
-    // Obliczamy kolumnę na podstawie dnia
-    // Dzień 1 = kolumna I (indeks 8), dzień 2 = J (indeks 9), ..., dzień 19 = AA (indeks 26), itd.
-    const columnIndex = 8 + day - 1; // Dzień 1 -> indeks 8 (kolumna I)
-    const dayColumnLetter = getColumnLetter(columnIndex);
-    const valueRange = `${month}!${dayColumnLetter}${categoryRowIndex}`;
-
-    const valueUrl = `${BASE_URL}/${SPREADSHEET_ID}/values/${valueRange}?key=${API_KEY}`;
-    const valueResponse = await axios.get(valueUrl);
-
-    const amount = valueResponse.data.values?.[0]?.[0] || 0;
+    const rowValues = await getCategoryRowValues(month, categoryRowIndex);
+    const dayOffset = day - 1;
+    const amount = rowValues[dayOffset] ?? 0;
     // Usuń spacje i zamień przecinek na kropkę przed parsowaniem
     // Google Sheets może zwracać: "1 000,50" lub "1,000.50"
     const cleanAmount =
@@ -170,7 +255,7 @@ export async function addExpense(
   day: number,
   price: string,
   month: string
-): Promise<void> {
+): Promise<number> {
   try {
     // Konwertujemy cenę (obsługujemy przecinki i wyrażenia matematyczne)
     const amount = safeEval(price);
@@ -221,6 +306,9 @@ export async function addExpense(
     if (response.data.success !== true && !response.data.message) {
       console.warn("Nieoczekiwany format odpowiedzi:", response.data);
     }
+
+    invalidateMonthCache(month);
+    return roundedAmount;
   } catch (error) {
     console.error("Error adding expense:", error);
     if (error instanceof Error) {

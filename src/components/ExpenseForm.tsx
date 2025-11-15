@@ -95,13 +95,22 @@ export function ExpenseForm() {
   });
 
   // TanStack Query mutation dla dodawania wydatków
-  const addExpenseMutation = useMutation({
-    mutationFn: async (data: {
+  const addExpenseMutation = useMutation<
+    number,
+    Error,
+    {
       category: string;
       day: number;
       price: string;
       month: string;
-    }) => {
+    },
+    {
+      previousCategory: string;
+      previousDay: string;
+      previousPrice: string;
+    }
+  >({
+    mutationFn: async (data) => {
       return addExpense(data.category, data.day, data.price, data.month);
     },
     onMutate: async (variables) => {
@@ -119,8 +128,11 @@ export function ExpenseForm() {
         previousPrice: variables.price,
       };
     },
-    onSuccess: () => {
-      toast.success("Wydatek dodany pomyślnie! ✓");
+    onSuccess: (addedAmount: number, variables) => {
+      const formattedAmount = addedAmount.toFixed(2);
+      toast.success(
+        `Dodano ${formattedAmount} zł do kategorii ${variables.category}`
+      );
     },
     onError: (error: Error, _variables, context) => {
       // Rollback - przywróć dane w razie błędu
@@ -288,14 +300,14 @@ export function ExpenseForm() {
                             <SelectValue placeholder="Wybierz kategorię..." />
                           </SelectTrigger>
                         </FormControl>
-                        <SelectContent className="max-h-[250px]">
+                        <SelectContent className="max-h-[420px]">
                           {categories.map((categoryGroup) => {
                             const categoryName = Object.keys(categoryGroup)[0];
                             const subcategories = categoryGroup[categoryName];
 
                             return (
                               <div key={categoryName}>
-                                <div className="px-3 py-2 text-xs font-bold text-gray-500 bg-gray-50 uppercase tracking-wide sticky top-0">
+                                <div className="px-3 py-2 text-xs font-bold text-gray-500 bg-gray-50 uppercase tracking-wide">
                                   {categoryName}
                                 </div>
                                 {subcategories.map((subcategory) => (
@@ -399,18 +411,18 @@ export function ExpenseForm() {
                     className="w-full h-12 text-base font-semibold shadow-md hover:shadow-lg transition-all"
                     disabled={addExpenseMutation.isPending}
                   >
-                  {addExpenseMutation.isPending ? (
-                    <>
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      Dodawanie...
-                    </>
-                  ) : (
-                    <>
-                      <span className="text-lg mr-2">💾</span>
-                      Zapisz wydatek
-                    </>
-                  )}
-                </Button>
+                    {addExpenseMutation.isPending ? (
+                      <>
+                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                        Dodawanie...
+                      </>
+                    ) : (
+                      <>
+                        <span className="text-lg mr-2">💾</span>
+                        Zapisz wydatek
+                      </>
+                    )}
+                  </Button>
                 </div>
               </form>
             </Form>
