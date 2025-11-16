@@ -615,7 +615,7 @@ export function ExpenseForm() {
                         <div className="relative">
                           <Input
                             type="text"
-                            inputMode="numeric"
+                            inputMode="decimal"
                             pattern="[0-9.,+\-*/()]*"
                             placeholder="0.00 lub 49.99+20"
                             enterKeyHint="done"
