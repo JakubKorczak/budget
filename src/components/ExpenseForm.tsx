@@ -617,7 +617,7 @@ export function ExpenseForm() {
                             type="text"
                             inputMode="decimal"
                             pattern="[0-9.,+\-*/()]*"
-                            placeholder="0.00 lub 49.99+20"
+                            placeholder="0.00"
                             enterKeyHint="done"
                             autoComplete="off"
                             autoCorrect="off"
