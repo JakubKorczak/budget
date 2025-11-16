@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import * as z from "zod";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
@@ -34,10 +34,108 @@ import {
 import {
   getCategories,
   addExpense,
-  getAmount,
   getCurrentMonth,
+  getCachedCategoriesSnapshot,
+  getDayAmounts,
+  getCachedDayAmountsSnapshot,
+  clearCategoriesCache,
+  clearAllDayAmountCaches,
+  setDayAmountsCache,
+  removeDayAmountsCache,
 } from "@/services/googleSheets";
+import type { DayAmountsMap } from "@/services/googleSheets";
 import type { Category } from "@/types/expense";
+import { CategoryCombobox } from "@/components/CategoryCombobox";
+
+function usePreventPullToRefresh(isActive: boolean) {
+  useEffect(() => {
+    if (!isActive || typeof window === "undefined") {
+      return;
+    }
+
+    const root = document.getElementById("root");
+    if (!root) {
+      return;
+    }
+
+    const previousOverflow = root.style.overflow;
+    const previousTouchAction = root.style.touchAction;
+
+    root.style.overflow = "hidden";
+    root.style.touchAction = "none";
+
+    return () => {
+      root.style.overflow = previousOverflow;
+      root.style.touchAction = previousTouchAction;
+    };
+  }, [isActive]);
+}
+
+function usePullToRefresh(
+  handler: () => void | Promise<void>,
+  enabled: boolean,
+  threshold = 80
+) {
+  useEffect(() => {
+    if (!enabled || typeof window === "undefined") {
+      return;
+    }
+
+    let startY = 0;
+    let currentY = 0;
+    let isPulling = false;
+    let isExecuting = false;
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (window.scrollY > 0 || isExecuting) {
+        return;
+      }
+      startY = event.touches[0]?.clientY ?? 0;
+      currentY = startY;
+      isPulling = true;
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      if (!isPulling || isExecuting) {
+        return;
+      }
+      currentY = event.touches[0]?.clientY ?? 0;
+      const delta = currentY - startY;
+      if (delta > 0 && window.scrollY <= 0) {
+        event.preventDefault();
+      }
+    };
+
+    const handleTouchEnd = () => {
+      if (!isPulling || isExecuting) {
+        isPulling = false;
+        return;
+      }
+
+      const delta = currentY - startY;
+      isPulling = false;
+
+      if (delta < threshold || window.scrollY > 0) {
+        return;
+      }
+
+      isExecuting = true;
+      Promise.resolve(handler()).finally(() => {
+        isExecuting = false;
+      });
+    };
+
+    window.addEventListener("touchstart", handleTouchStart, { passive: true });
+    window.addEventListener("touchmove", handleTouchMove, { passive: false });
+    window.addEventListener("touchend", handleTouchEnd);
+
+    return () => {
+      window.removeEventListener("touchstart", handleTouchStart);
+      window.removeEventListener("touchmove", handleTouchMove);
+      window.removeEventListener("touchend", handleTouchEnd);
+    };
+  }, [enabled, handler, threshold]);
+}
 
 // Schemat walidacji formularza
 const expenseFormSchema = z.object({
@@ -76,23 +174,137 @@ const expenseFormSchema = z.object({
     ),
 });
 
+function evaluatePriceExpression(value: string): number | null {
+  if (!value?.length) {
+    return null;
+  }
+
+  try {
+    const cleaned = value.replace(/\s/g, "").replace(/,/g, ".");
+    const result = new Function("return " + cleaned)();
+    const numResult = typeof result === "number" ? result : parseFloat(result);
+
+    if (!Number.isFinite(numResult)) {
+      return null;
+    }
+
+    const rounded = Math.round(numResult * 100) / 100;
+    return parseFloat(rounded.toFixed(2));
+  } catch {
+    return null;
+  }
+}
+
+const DAY_OPTIONS = Array.from({ length: 31 }, (_, index) =>
+  (index + 1).toString()
+);
+
 type ExpenseFormValues = z.infer<typeof expenseFormSchema>;
 
 export function ExpenseForm() {
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [isLoadingCategories, setIsLoadingCategories] = useState(true);
   const [isLoadingAmount, setIsLoadingAmount] = useState(false);
-  const [errorMessage, setErrorMessage] = useState("");
-  const [currentMonth] = useState(getCurrentMonth());
+  const [isCategoryPickerOpen, setIsCategoryPickerOpen] = useState(false);
+  const [isDayPickerOpen, setIsDayPickerOpen] = useState(false);
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
+  const [dayCacheVersion, setDayCacheVersion] = useState(0);
+  const currentMonth = useMemo(() => getCurrentMonth(), []);
+  const queryClient = useQueryClient();
+
+  const cachedCategories = useMemo(() => getCachedCategoriesSnapshot(), []);
+
+  const { data: categories = [], error: categoriesError } = useQuery<
+    Category[]
+  >({
+    queryKey: ["categories"],
+    queryFn: getCategories,
+    initialData: cachedCategories ?? undefined,
+    placeholderData: cachedCategories ?? undefined,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    refetchOnWindowFocus: false,
+    refetchOnMount: cachedCategories ? true : false,
+  });
+
+  const normalizedCategories = useMemo(() => {
+    return categories.map((group) => {
+      const groupName = Object.keys(group)[0];
+      const subcategories = [...group[groupName]];
+      return { [groupName]: subcategories } as Category;
+    });
+  }, [categories]);
+
+  const errorMessage = categoriesError?.message ?? "";
 
   const form = useForm<ExpenseFormValues>({
     resolver: zodResolver(expenseFormSchema),
+    mode: "onSubmit",
+    reValidateMode: "onSubmit",
+    shouldUnregister: true,
     defaultValues: {
       category: "",
       day: new Date().getDate().toString(),
       price: "",
     },
   });
+
+  const [selectedCategory, selectedDay] = useWatch({
+    control: form.control,
+    name: ["category", "day"],
+  });
+
+  const sanitizePriceInput = useCallback((value: string) => {
+    return value.replace(/[^0-9.,+\-*/()]/g, "");
+  }, []);
+
+  usePreventPullToRefresh(isCategoryPickerOpen || isDayPickerOpen);
+
+  const handlePullRefresh = useCallback(async () => {
+    if (isPullRefreshing) {
+      return;
+    }
+
+    setIsPullRefreshing(true);
+
+    try {
+      clearCategoriesCache();
+      clearAllDayAmountCaches();
+
+      const parsedDay = selectedDay ? parseInt(selectedDay, 10) : NaN;
+      const refreshDayAmounts = Number.isFinite(parsedDay)
+        ? (async () => {
+            const dayNumber = parsedDay;
+            const amounts = await getDayAmounts(currentMonth, dayNumber, {
+              forceRefresh: true,
+            });
+
+            if (selectedCategory) {
+              const amount = amounts[selectedCategory] ?? 0;
+              form.setValue("price", amount > 0 ? amount.toString() : "");
+            }
+          })()
+        : Promise.resolve();
+
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["categories"] }),
+        refreshDayAmounts,
+      ]);
+
+      setDayCacheVersion((version) => version + 1);
+      toast.success("Dane zostały odświeżone");
+    } catch (error) {
+      console.error("Błąd podczas odświeżania danych:", error);
+      toast.error("Nie udało się odświeżyć danych");
+    } finally {
+      setIsPullRefreshing(false);
+    }
+  }, [
+    currentMonth,
+    form,
+    isPullRefreshing,
+    queryClient,
+    selectedCategory,
+    selectedDay,
+  ]);
 
   // TanStack Query mutation dla dodawania wydatków
   const addExpenseMutation = useMutation<
@@ -108,6 +320,10 @@ export function ExpenseForm() {
       previousCategory: string;
       previousDay: string;
       previousPrice: string;
+      previousDaySnapshot: DayAmountsMap | null;
+      optimisticDay: number;
+      optimisticCategory: string;
+      optimisticApplied: boolean;
     }
   >({
     mutationFn: async (data) => {
@@ -121,11 +337,36 @@ export function ExpenseForm() {
         price: "",
       });
 
+      const dayNumber = variables.day;
+      const previousDaySnapshot = getCachedDayAmountsSnapshot(
+        currentMonth,
+        dayNumber
+      );
+      const optimisticDelta = evaluatePriceExpression(variables.price);
+      let optimisticApplied = false;
+
+      if (optimisticDelta !== null) {
+        const nextSnapshot: DayAmountsMap = {
+          ...(previousDaySnapshot ?? {}),
+        };
+        const currentValue = nextSnapshot[variables.category] ?? 0;
+        nextSnapshot[variables.category] = parseFloat(
+          (currentValue + optimisticDelta).toFixed(2)
+        );
+        setDayAmountsCache(currentMonth, dayNumber, nextSnapshot);
+        setDayCacheVersion((version) => version + 1);
+        optimisticApplied = true;
+      }
+
       // Zwróć poprzednie dane na wypadek błędu (rollback)
       return {
         previousCategory: variables.category,
         previousDay: variables.day.toString(),
         previousPrice: variables.price,
+        previousDaySnapshot,
+        optimisticDay: dayNumber,
+        optimisticCategory: variables.category,
+        optimisticApplied,
       };
     },
     onSuccess: (addedAmount: number, variables) => {
@@ -133,6 +374,8 @@ export function ExpenseForm() {
       toast.success(
         `Dodano ${formattedAmount} zł do kategorii ${variables.category}`
       );
+      void getDayAmounts(currentMonth, variables.day, { forceRefresh: true });
+      setDayCacheVersion((version) => version + 1);
     },
     onError: (error: Error, _variables, context) => {
       // Rollback - przywróć dane w razie błędu
@@ -140,6 +383,18 @@ export function ExpenseForm() {
         form.setValue("category", context.previousCategory);
         form.setValue("day", context.previousDay);
         form.setValue("price", context.previousPrice);
+      }
+      if (context?.optimisticApplied) {
+        if (context.previousDaySnapshot) {
+          setDayAmountsCache(
+            currentMonth,
+            context.optimisticDay,
+            context.previousDaySnapshot
+          );
+        } else {
+          removeDayAmountsCache(currentMonth, context.optimisticDay);
+        }
+        setDayCacheVersion((version) => version + 1);
       }
       toast.error(error.message || "Nie udało się dodać wydatku");
     },
@@ -152,90 +407,93 @@ export function ExpenseForm() {
     },
   });
 
-  // Pobierz kategorie przy montowaniu komponentu (tylko raz!)
-  useEffect(() => {
-    const fetchCategories = async () => {
-      try {
-        const data = await getCategories();
-        setCategories(data);
-        setErrorMessage("");
-      } catch (error) {
-        console.error("Błąd podczas pobierania kategorii:", error);
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Nie udało się pobrać kategorii";
-        setErrorMessage(message);
-      } finally {
-        setIsLoadingCategories(false);
+  const { mutate: mutateExpense, isPending: isAddExpensePending } =
+    addExpenseMutation;
+
+  usePullToRefresh(
+    handlePullRefresh,
+    !isCategoryPickerOpen && !isDayPickerOpen && !isAddExpensePending
+  );
+
+  const onSubmit = useCallback(
+    async (data: ExpenseFormValues) => {
+      if (isAddExpensePending) {
+        return;
       }
-    };
+      mutateExpense({
+        category: data.category,
+        day: parseInt(data.day),
+        price: data.price,
+        month: currentMonth,
+      });
+    },
+    [currentMonth, isAddExpensePending, mutateExpense]
+  );
 
-    fetchCategories();
-  }, []); // Pusty array dependency - wykonaj tylko raz!
-
-  // Pobierz kwotę TYLKO gdy zmieni się kategoria lub dzień (NIE przy wpisywaniu ceny!)
   useEffect(() => {
-    let timeoutId: ReturnType<typeof setTimeout>;
+    let isActive = true;
 
-    // Monitoruj TYLKO pola category i day
-    const subscription = form.watch((value, { name }) => {
-      // Reaguj TYLKO gdy zmienia się category lub day (NIE price!)
-      if (name !== "category" && name !== "day") {
+    const hydrateAmount = async () => {
+      if (!selectedDay) {
+        if (isActive) {
+          setIsLoadingAmount(false);
+        }
         return;
       }
 
-      // Wyczyść poprzedni timeout
-      if (timeoutId) {
-        clearTimeout(timeoutId);
+      const dayNumber = parseInt(selectedDay, 10);
+      if (!Number.isFinite(dayNumber)) {
+        if (isActive) {
+          setIsLoadingAmount(false);
+        }
+        return;
       }
 
-      // Tylko jeśli kategoria i dzień są wybrane
-      if (value.category && value.day) {
-        // Opóźnij zapytanie (debouncing)
-        timeoutId = setTimeout(async () => {
-          setIsLoadingAmount(true);
-          try {
-            const amount = await getAmount(
-              value.category!,
-              parseInt(value.day!),
-              currentMonth
-            );
-            // Jeśli jest wartość (> 0), ustaw ją; jeśli 0, wyczyść pole
-            if (amount > 0) {
-              form.setValue("price", amount.toString());
-            } else {
-              form.setValue("price", "");
-            }
-          } catch (error) {
-            console.error("Błąd podczas pobierania kwoty:", error);
-            // Nie pokazuj błędu użytkownikowi - to opcjonalna funkcja
-          } finally {
-            setIsLoadingAmount(false);
-          }
-        }, 300);
+      const cachedDayAmounts = getCachedDayAmountsSnapshot(
+        currentMonth,
+        dayNumber
+      );
+
+      const applyAmount = (amounts: DayAmountsMap | null) => {
+        if (!amounts || !selectedCategory) {
+          return;
+        }
+        const amount = amounts[selectedCategory] ?? 0;
+        form.setValue("price", amount > 0 ? amount.toString() : "");
+      };
+
+      if (cachedDayAmounts) {
+        applyAmount(cachedDayAmounts);
       }
-    });
+
+      const shouldShowSpinner = Boolean(selectedCategory) && !cachedDayAmounts;
+      if (shouldShowSpinner && isActive) {
+        setIsLoadingAmount(true);
+      }
+
+      try {
+        const dayAmounts = await getDayAmounts(currentMonth, dayNumber);
+        if (!isActive) {
+          return;
+        }
+        applyAmount(dayAmounts);
+      } catch (error) {
+        if (isActive) {
+          console.error("Błąd podczas pobierania kwot dnia:", error);
+        }
+      } finally {
+        if (shouldShowSpinner && isActive) {
+          setIsLoadingAmount(false);
+        }
+      }
+    };
+
+    void hydrateAmount();
 
     return () => {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-      subscription.unsubscribe();
+      isActive = false;
     };
-  }, [form, currentMonth]); // Reaguj TYLKO na kategorie i dzień!
-
-  const onSubmit = async (data: ExpenseFormValues) => {
-    addExpenseMutation.mutate({
-      category: data.category,
-      day: parseInt(data.day),
-      price: data.price,
-      month: currentMonth,
-    });
-  };
-
-  // Generuj opcje dni (1-31)
-  const dayOptions = Array.from({ length: 31 }, (_, i) => i + 1);
+  }, [selectedCategory, selectedDay, currentMonth, form, dayCacheVersion]);
 
   return (
     <>
@@ -245,6 +503,12 @@ export function ExpenseForm() {
           <CardDescription>
             {currentMonth} {new Date().getFullYear()}
           </CardDescription>
+          {isPullRefreshing && (
+            <div className="mt-2 flex items-center text-sm text-muted-foreground">
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              Odświeżanie danych...
+            </div>
+          )}
         </CardHeader>
         <CardContent className="pt-4">
           {errorMessage && (
@@ -269,7 +533,7 @@ export function ExpenseForm() {
             </div>
           )}
 
-          {isLoadingCategories ? (
+          {!categories.length ? (
             <div className="flex flex-col items-center justify-center py-12">
               <Loader2 className="h-10 w-10 animate-spin text-blue-500 mb-3" />
               <span className="text-sm text-gray-600">
@@ -291,39 +555,12 @@ export function ExpenseForm() {
                         <span className="text-lg">🏷️</span>
                         <span>Kategoria</span>
                       </FormLabel>
-                      <Select
-                        onValueChange={field.onChange}
+                      <CategoryCombobox
+                        categories={normalizedCategories}
                         value={field.value}
-                      >
-                        <FormControl>
-                          <SelectTrigger className="h-12 text-base">
-                            <SelectValue placeholder="Wybierz kategorię..." />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent className="max-h-[420px] overscroll-contain">
-                          {categories.map((categoryGroup) => {
-                            const categoryName = Object.keys(categoryGroup)[0];
-                            const subcategories = categoryGroup[categoryName];
-
-                            return (
-                              <div key={categoryName}>
-                                <div className="px-3 py-2 text-xs font-bold text-gray-500 bg-gray-50 uppercase tracking-wide">
-                                  {categoryName}
-                                </div>
-                                {subcategories.map((subcategory) => (
-                                  <SelectItem
-                                    key={subcategory}
-                                    value={subcategory}
-                                    className="py-3"
-                                  >
-                                    {subcategory}
-                                  </SelectItem>
-                                ))}
-                              </div>
-                            );
-                          })}
-                        </SelectContent>
-                      </Select>
+                        onChange={field.onChange}
+                        onOpenChange={setIsCategoryPickerOpen}
+                      />
                       <FormMessage className="text-xs" />
                     </FormItem>
                   )}
@@ -341,6 +578,7 @@ export function ExpenseForm() {
                       <Select
                         onValueChange={field.onChange}
                         value={field.value}
+                        onOpenChange={setIsDayPickerOpen}
                       >
                         <FormControl>
                           <SelectTrigger className="h-12 text-base">
@@ -348,7 +586,7 @@ export function ExpenseForm() {
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent className="max-h-88 overscroll-contain">
-                          {dayOptions.map((day) => (
+                          {DAY_OPTIONS.map((day) => (
                             <SelectItem
                               key={day}
                               value={day.toString()}
@@ -377,17 +615,18 @@ export function ExpenseForm() {
                         <div className="relative">
                           <Input
                             type="text"
-                            inputMode="decimal"
+                            inputMode="numeric"
                             pattern="[0-9.,+\-*/()]*"
                             placeholder="0.00 lub 49.99+20"
+                            enterKeyHint="done"
+                            autoComplete="off"
+                            autoCorrect="off"
                             {...field}
                             onChange={(e) => {
-                              let value = e.target.value;
-                              // Zamień przecinek na kropkę
-                              value = value.replace(/,/g, ".");
-                              // Zezwalaj na cyfry, kropkę, operatory matematyczne i nawiasy
-                              value = value.replace(/[^\d.+\-*/()]/g, "");
-                              field.onChange(value);
+                              const sanitized = sanitizePriceInput(
+                                e.target.value
+                              );
+                              field.onChange(sanitized);
                             }}
                             disabled={isLoadingAmount}
                             className="h-12 text-base pl-4 pr-12 font-medium"
@@ -409,19 +648,9 @@ export function ExpenseForm() {
                   <Button
                     type="submit"
                     className="w-full h-12 text-base font-semibold shadow-md hover:shadow-lg transition-all"
-                    disabled={addExpenseMutation.isPending}
                   >
-                    {addExpenseMutation.isPending ? (
-                      <>
-                        <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                        Dodawanie...
-                      </>
-                    ) : (
-                      <>
-                        <span className="text-lg mr-2">💾</span>
-                        Zapisz wydatek
-                      </>
-                    )}
+                    <span className="text-lg mr-2">💾</span>
+                    Zapisz wydatek
                   </Button>
                 </div>
               </form>

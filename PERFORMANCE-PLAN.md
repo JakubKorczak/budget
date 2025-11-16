@@ -63,13 +63,21 @@
 | 1. Audyt i pomiary        | Lighthouse, Profiler, bundler          | Zebrane baseline KPI                       |
 | 2. Klient szybkie wygrane | Memoization, debounce, Select UX       | mniejsza liczba renderów, szybszy autofill |
 | 3. Warstwa danych         | Batch, cache trwały, Apps Script proxy | mniej zapytań, stabilne limity API         |
-| 4. Build & CDN            | Bundle split, SW, hosting              | krótszy TTI i FCP                          |
-| 5. Monitoring             | Sentry + raporty                       | szybkie wykrywanie regresji                |
+
+## 7. Status wdrożenia (15.11.2025)
+
+- ✅ Formularz wykorzystuje `@tanstack/react-query` (stale cache + lokalne memoizacje) oraz trwały cache w `localStorage`, więc ponowne załadowanie aplikacji nie bije Google Sheets.
+- ✅ `CategoryCombobox` zastąpił stary `Select` — ma wyszukiwarkę, wirtualizację z `@tanstack/react-virtual` i jest memoizowany, co znacząco ogranicza liczbę renderów.
+- ✅ `React Hook Form` działa teraz w trybie `onSubmit` z `shouldUnregister: true`, a pola zostały rozbite na mniejsze komponenty, co poprawia wydajność i czytelność.
+- ✅ Autofill kwoty korzysta z `AbortController` + debounce 150 ms, dzięki czemu nie powstają wyścigi requestów i nie przekraczamy limitów API.
+- ✅ Build wspiera `rollup-plugin-visualizer` (`npm run analyze`) oraz lazy-loading widoków (`React.lazy` dla `Login` i `ExpenseForm`), co zmniejsza TTI i daje narzędzia do dalszej analizy bundla.
+- ✅ Service Worker (`public/sw.js`) cache'uje statyczne assety i wyniki zapytań do Google Sheets (tryb network-first), zapewniając fallback offline dla listy kategorii oraz szybsze ponowne wizyty.
+- ℹ️ Apps Script proxy i batch requesty pozostają otwartym tematem — wymagają zmian po stronie arkusza/Apps Scriptu.
 
 ## 8. Kolejne kroki (najbliższy sprint)
 
-1. Dodać `bundle-visualizer` i raport z obecnym rozmiarem JS.
-2. Zaimplementować `useQuery` dla kategorii z `staleTime = Infinity`.
-3. Wprowadzić `AbortController` w `getAmount` i skrócić debounce.
-4. Przygotować Apps Script endpoint zwracający wynik dodanego wydatku.
-5. Ustalić w backlogu zadanie na Service Worker (cache statyczny + fallback offline dla kategorii).
+1. Przygotować i udokumentować Apps Script endpoint (`POST /addExpense`) tak, aby zmniejszyć zależność od API key i uprościć CORS.
+2. Wprowadzić batchowane odczyty (`spreadsheets.values.batchGet`) dla pobierania wielu kategorii jednocześnie — zmniejszy to liczbę requestów per render.
+3. Zweryfikować Service Workera na środowisku produkcyjnym (offline test + kontrola budowy), a wynik i checklistę dołączyć do `DEPLOYMENT.md`.
+4. Podłączyć Lighthouse CI do pipeline’u (`lint → test → build → lhci`) i ustawić progi TTI < 3 s.
+5. Zmierzyć TTI i czas reakcji formularza na urządzeniach mobilnych po wdrożonych zmianach oraz zarchiwizować wyniki w repo.

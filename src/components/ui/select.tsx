@@ -59,15 +59,23 @@ function SelectContent({
   children,
   position = "popper",
   align = "center",
+  style,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
         data-slot="select-content"
+        style={{
+          width: "var(--radix-select-trigger-width)",
+          maxWidth:
+            "min(var(--radix-select-trigger-width), calc(100vw - 2rem))",
+          ...style,
+        }}
         className={cn(
           "bg-white text-gray-900 border border-gray-200 rounded-md shadow-lg",
-          "relative z-50 max-h-(--radix-select-content-available-height) min-w-32",
+          "relative z-50 max-h-(--radix-select-content-available-height)",
+          "w-full max-w-full",
           "origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto",
           "data-[state=open]:animate-in data-[state=closed]:animate-out",
           "data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
@@ -85,7 +93,7 @@ function SelectContent({
           className={cn(
             "p-1",
             position === "popper" &&
-              "h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)] scroll-my-1"
+              "h-(--radix-select-trigger-height) w-full min-w-(--radix-select-trigger-width) scroll-my-1"
           )}
         >
           {children}

@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster, toast } from "sonner";
+import "./App.css";
+
 import { ExpenseForm } from "./components/ExpenseForm";
 import { Login } from "./components/Login";
-import "./App.css";
 
 // Hasło można zmienić w pliku .env
 const CORRECT_PASSWORD = import.meta.env.VITE_APP_PASSWORD || "budżet2025";
@@ -29,54 +30,6 @@ function App() {
     const session = localStorage.getItem(SESSION_KEY);
     return session === CORRECT_PASSWORD;
   });
-
-  // Pull to refresh - odśwież stronę przez przeciągnięcie w dół
-  useEffect(() => {
-    let startY = 0;
-    let isPulling = false;
-
-    const handleTouchStart = (e: TouchEvent) => {
-      // Sprawdź czy scroll jest na samej górze
-      const scrollTop = window.scrollY || document.documentElement.scrollTop;
-      if (scrollTop === 0) {
-        startY = e.touches[0].clientY;
-      }
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-      const scrollTop = window.scrollY || document.documentElement.scrollTop;
-      if (scrollTop === 0) {
-        const currentY = e.touches[0].clientY;
-        const distance = currentY - startY;
-
-        // Jeśli przeciągnięto w dół o więcej niż 80px
-        if (distance > 80 && !isPulling) {
-          isPulling = true;
-          toast.loading("Odświeżanie...", { id: "refresh" });
-        }
-      }
-    };
-
-    const handleTouchEnd = () => {
-      if (isPulling) {
-        setTimeout(() => {
-          window.location.reload();
-        }, 300);
-      }
-      isPulling = false;
-      startY = 0;
-    };
-
-    document.addEventListener("touchstart", handleTouchStart);
-    document.addEventListener("touchmove", handleTouchMove);
-    document.addEventListener("touchend", handleTouchEnd);
-
-    return () => {
-      document.removeEventListener("touchstart", handleTouchStart);
-      document.removeEventListener("touchmove", handleTouchMove);
-      document.removeEventListener("touchend", handleTouchEnd);
-    };
-  }, []);
 
   const handleLogin = (password: string) => {
     if (password === CORRECT_PASSWORD) {

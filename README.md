@@ -14,6 +14,7 @@ Nowoczesna, responsywna aplikacja webowa do zarządzania budżetem domowym z syn
 - 📱 **Responsywny** - Działa na telefonie, tablecie i komputerze
 - 🔢 **Wyrażenia matematyczne** - Wpisz `20+30` zamiast liczyć w głowie
 - 🌙 **Dark Mode** - Automatyczne dostosowanie do systemu
+- 📦 **Offline cache** - Service Worker buforuje statyczne pliki i ostatnie kategorie
 - ✅ **Walidacja** - Formularze z pełną walidacją
 - 🚀 **Szybki** - Zbudowany na Vite
 
@@ -54,6 +55,27 @@ npm run dev
 ### Potrzebujesz szczegółowych instrukcji?
 
 👉 **[QUICK-START.md](QUICK-START.md)** - Kompletny przewodnik krok po kroku (10 minut)
+
+### 📦 Analiza bundla
+
+Jeśli potrzebujesz sprawdzić co zajmuje najwięcej miejsca w paczce produkcyjnej, uruchom:
+
+```bash
+npm run analyze
+```
+
+Po zakończeniu builda raport znajdziesz w `dist/bundle-report.html` (otwórz w przeglądarce). Dzięki temu łatwo wyłapiesz moduły wymagające dalszego podziału lub lazy-loadingu.
+
+### 🌐 Offline / PWA
+
+W buildzie produkcyjnym aplikacja rejestruje lekkiego Service Workera (`public/sw.js`), który buforuje kluczowe assety oraz ostatnie odpowiedzi Google Sheets. Aby to sprawdzić lokalnie:
+
+```bash
+npm run build
+npm run preview
+```
+
+Następnie otwórz aplikację w przeglądarce, przełącz DevTools w tryb „Offline” i odśwież — UI nadal będzie dostępne, a zapisane wcześniej kategorie zostaną wczytane z cache.
 
 ## 📚 Dokumentacja
 
