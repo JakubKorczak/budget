@@ -459,7 +459,7 @@ export function ExpenseForm() {
           return;
         }
         const amount = amounts[selectedCategory] ?? 0;
-        form.setValue("price", amount > 0 ? amount.toString() : "");
+        form.setValue("price", amount !== 0 ? amount.toString() : "");
       };
 
       if (cachedDayAmounts) {
@@ -615,7 +615,7 @@ export function ExpenseForm() {
                         <div className="relative">
                           <Input
                             type="text"
-                            inputMode="decimal"
+                            inputMode="numeric"
                             pattern="[0-9.,+\-*/()]*"
                             placeholder="0.00"
                             enterKeyHint="done"
