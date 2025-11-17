@@ -616,7 +616,7 @@ export function ExpenseForm() {
                           <Input
                             type="number"
                             // inputMode="number"
-                            // pattern="[0-9.,+\-*/()]*"
+                            pattern="[0-9.,+\-*/()]*"
                             placeholder="0.00"
                             enterKeyHint="done"
                             autoComplete="off"
