@@ -616,7 +616,6 @@ export function ExpenseForm() {
                           <Input
                             type="text"
                             inputMode="decimal"
-                            onInvalid={(e) => e.preventDefault()}
                             pattern="[0-9.,+\-*/()]*"
                             placeholder="0.00"
                             enterKeyHint="done"
