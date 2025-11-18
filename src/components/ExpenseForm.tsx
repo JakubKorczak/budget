@@ -323,6 +323,7 @@ export function ExpenseForm() {
   const [dayCacheVersion, setDayCacheVersion] = useState(0);
   const [isPriceFocused, setIsPriceFocused] = useState(false);
   const [isIosDevice, setIsIosDevice] = useState(false);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
   const currentMonth = useMemo(() => getCurrentMonth(), []);
   const queryClient = useQueryClient();
 
@@ -376,6 +377,37 @@ export function ExpenseForm() {
     }
     setIsIosDevice(/iPhone|iPad|iPod/i.test(navigator.userAgent));
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !isIosDevice) {
+      setKeyboardOffset(0);
+      return;
+    }
+
+    const viewport = window.visualViewport;
+    if (!viewport) {
+      setKeyboardOffset(0);
+      return;
+    }
+
+    const updateKeyboardOffset = () => {
+      const fullHeight = window.innerHeight;
+      const overlap = Math.max(
+        0,
+        fullHeight - (viewport.height + viewport.offsetTop)
+      );
+      setKeyboardOffset(overlap);
+    };
+
+    updateKeyboardOffset();
+    viewport.addEventListener("resize", updateKeyboardOffset);
+    viewport.addEventListener("scroll", updateKeyboardOffset);
+
+    return () => {
+      viewport.removeEventListener("resize", updateKeyboardOffset);
+      viewport.removeEventListener("scroll", updateKeyboardOffset);
+    };
+  }, [isIosDevice]);
 
   const sanitizePriceInput = useCallback((value: string) => {
     if (!value) {
@@ -744,6 +776,7 @@ export function ExpenseForm() {
 
   const showDesktopRibbon = !isIosDevice;
   const showMobileRibbon = isIosDevice && isPriceFocused;
+  const keyboardAwareBottom = Math.max(0, keyboardOffset) + 16;
 
   return (
     <>
@@ -934,7 +967,12 @@ export function ExpenseForm() {
       </Card>
       {showMobileRibbon && typeof document !== "undefined"
         ? createPortal(
-            <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 px-4 pb-[calc(env(safe-area-inset-bottom)+12px)]">
+            <div
+              className="pointer-events-none fixed inset-x-0 z-50 px-4"
+              style={{
+                bottom: `calc(env(safe-area-inset-bottom) + ${keyboardAwareBottom}px)`,
+              }}
+            >
               <div className="pointer-events-auto mx-auto w-full max-w-md">
                 <CalculatorRibbon
                   onInsertSymbol={handleInsertSymbol}
