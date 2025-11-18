@@ -392,10 +392,7 @@ export function ExpenseForm() {
 
     const updateKeyboardOffset = () => {
       const fullHeight = window.innerHeight;
-      const overlap = Math.max(
-        0,
-        fullHeight - (viewport.height + viewport.offsetTop)
-      );
+      const overlap = Math.max(0, fullHeight - viewport.height);
       setKeyboardOffset(overlap);
     };
 
@@ -776,7 +773,7 @@ export function ExpenseForm() {
 
   const showDesktopRibbon = !isIosDevice;
   const showMobileRibbon = isIosDevice && isPriceFocused;
-  const keyboardAwareBottom = Math.max(0, keyboardOffset) + 16;
+  const keyboardAwareBottom = Math.max(20, keyboardOffset + 20);
 
   return (
     <>
