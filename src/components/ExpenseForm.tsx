@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+
+import { cn } from "@/lib/utils";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -260,9 +263,14 @@ function parsePriceInput(value: string): ParsedPriceInput | null {
 type CalculatorRibbonProps = {
   onInsertSymbol: (symbol: "=" | "+" | "-") => void;
   disabled?: boolean;
+  className?: string;
 };
 
-function CalculatorRibbon({ onInsertSymbol, disabled }: CalculatorRibbonProps) {
+function CalculatorRibbon({
+  onInsertSymbol,
+  disabled,
+  className,
+}: CalculatorRibbonProps) {
   const buttons: Array<{ label: string; value: "=" | "+" | "-" }> = [
     { label: "=", value: "=" },
     { label: "+", value: "+" },
@@ -270,7 +278,12 @@ function CalculatorRibbon({ onInsertSymbol, disabled }: CalculatorRibbonProps) {
   ];
 
   return (
-    <div className="mb-3 flex gap-2 rounded-2xl border border-gray-200 bg-gray-50 p-2">
+    <div
+      className={cn(
+        "mb-3 flex gap-2 rounded-2xl border border-gray-200 bg-gray-50 p-2",
+        className
+      )}
+    >
       {buttons.map((button) => (
         <button
           key={button.value}
@@ -293,22 +306,7 @@ function CalculatorRibbon({ onInsertSymbol, disabled }: CalculatorRibbonProps) {
 const expenseFormSchema = z.object({
   category: z.string().min(1, "Wybierz kategorię"),
   day: z.string().min(1, "Wybierz dzień"),
-  price: z
-    .string()
-    .min(1, "Podaj koszt")
-    .superRefine((val, ctx) => {
-      if (parsePriceInput(val)) {
-        return;
-      }
-
-      const isFormula = val.trim().startsWith("=");
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: isFormula
-          ? "Formuła może zawierać tylko liczby oraz znaki + lub - (maks. 2 miejsca po przecinku)."
-          : "Wpisz poprawne działanie używając cyfr oraz znaków + lub - (maks. 2 miejsca po przecinku).",
-      });
-    }),
+  price: z.string().min(1, "Podaj koszt"),
 });
 
 const DAY_OPTIONS = Array.from({ length: 31 }, (_, index) =>
@@ -323,6 +321,8 @@ export function ExpenseForm() {
   const [isDayPickerOpen, setIsDayPickerOpen] = useState(false);
   const [isPullRefreshing, setIsPullRefreshing] = useState(false);
   const [dayCacheVersion, setDayCacheVersion] = useState(0);
+  const [isPriceFocused, setIsPriceFocused] = useState(false);
+  const [isIosDevice, setIsIosDevice] = useState(false);
   const currentMonth = useMemo(() => getCurrentMonth(), []);
   const queryClient = useQueryClient();
 
@@ -370,6 +370,13 @@ export function ExpenseForm() {
     name: ["category", "day"],
   });
 
+  useEffect(() => {
+    if (typeof navigator === "undefined") {
+      return;
+    }
+    setIsIosDevice(/iPhone|iPad|iPod/i.test(navigator.userAgent));
+  }, []);
+
   const sanitizePriceInput = useCallback((value: string) => {
     if (!value) {
       return "";
@@ -416,6 +423,27 @@ export function ExpenseForm() {
     },
     [form, sanitizePriceInput]
   );
+
+  const handlePriceFocus = useCallback(() => {
+    setIsPriceFocused(true);
+  }, []);
+
+  const handlePriceBlur = useCallback(() => {
+    requestAnimationFrame(() => {
+      const input = priceInputRef.current;
+      if (!input) {
+        setIsPriceFocused(false);
+        return;
+      }
+
+      if (
+        typeof document !== "undefined" &&
+        document.activeElement !== input
+      ) {
+        setIsPriceFocused(false);
+      }
+    });
+  }, []);
 
   usePreventPullToRefresh(isCategoryPickerOpen || isDayPickerOpen);
 
@@ -714,6 +742,9 @@ export function ExpenseForm() {
     };
   }, [selectedCategory, selectedDay, currentMonth, form, dayCacheVersion]);
 
+  const showDesktopRibbon = !isIosDevice;
+  const showMobileRibbon = isIosDevice && isPriceFocused;
+
   return (
     <>
       <Card className="w-full shadow-lg">
@@ -834,10 +865,14 @@ export function ExpenseForm() {
                         </FormLabel>
                         <FormControl>
                           <div className="space-y-2">
-                            <CalculatorRibbon
-                              onInsertSymbol={handleInsertSymbol}
-                              disabled={isLoadingAmount || isAddExpensePending}
-                            />
+                            {showDesktopRibbon && (
+                              <CalculatorRibbon
+                                onInsertSymbol={handleInsertSymbol}
+                                disabled={
+                                  isLoadingAmount || isAddExpensePending
+                                }
+                              />
+                            )}
                             <div className="relative">
                               <Input
                                 type="text"
@@ -857,6 +892,13 @@ export function ExpenseForm() {
                                     e.target.value
                                   );
                                   fieldProps.onChange(sanitized);
+                                }}
+                                onFocus={() => {
+                                  handlePriceFocus();
+                                }}
+                                onBlur={() => {
+                                  fieldProps.onBlur();
+                                  handlePriceBlur();
                                 }}
                                 disabled={isLoadingAmount}
                                 className="h-12 text-base pl-4 pr-12 font-medium"
@@ -890,6 +932,22 @@ export function ExpenseForm() {
           )}
         </CardContent>
       </Card>
+      {showMobileRibbon && typeof document !== "undefined"
+        ? createPortal(
+            <div className="pointer-events-none fixed inset-x-0 bottom-0 z-50 px-4 pb-[calc(env(safe-area-inset-bottom)+12px)]">
+              <div className="pointer-events-auto mx-auto w-full max-w-md">
+                <CalculatorRibbon
+                  onInsertSymbol={handleInsertSymbol}
+                  disabled={isLoadingAmount || isAddExpensePending}
+                  className="mb-0 shadow-xl"
+                />
+              </div>
+            </div>,
+            document.body
+          )
+        : null}
     </>
   );
+
+  
 }
