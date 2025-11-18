@@ -17,7 +17,15 @@ interface CategoryGridCacheEntry {
   snapshot: Array<{ row: number; value: string | null }>;
 }
 
-export type DayAmountsMap = Record<string, number>;
+export type DayAmountEntry = {
+  amount: number;
+  formula: string | null;
+};
+
+export type DayAmountsMap = Record<string, DayAmountEntry>;
+export type AddExpenseResult =
+  | { mode: "value"; amount: number }
+  | { mode: "formula"; formula: string };
 
 interface DayAmountsCacheEntry {
   timestamp: number;
@@ -291,9 +299,18 @@ async function fetchDayAmountsFromSheet(
   const columnLetter = getColumnLetter(dayColumnIndex);
   const endRow = startRow + rowData.length - 1;
   const dayRange = `${month}!${columnLetter}${startRow}:${columnLetter}${endRow}`;
-  const url = `${BASE_URL}/${SPREADSHEET_ID}/values/${dayRange}?key=${API_KEY}`;
-  const response = await axios.get(url);
-  const values: Array<Array<string | number>> = response.data.values || [];
+  const valuesUrl = `${BASE_URL}/${SPREADSHEET_ID}/values/${dayRange}?valueRenderOption=UNFORMATTED_VALUE&key=${API_KEY}`;
+  const formulaUrl = `${BASE_URL}/${SPREADSHEET_ID}/values/${dayRange}?valueRenderOption=FORMULA&key=${API_KEY}`;
+
+  const [valuesResponse, formulaResponse] = await Promise.all([
+    axios.get(valuesUrl),
+    axios.get(formulaUrl),
+  ]);
+
+  const values: Array<Array<string | number>> =
+    valuesResponse.data.values || [];
+  const formulas: Array<Array<string | number>> =
+    formulaResponse.data.values || [];
   const dayAmounts: DayAmountsMap = {};
 
   for (let idx = 0; idx < rowData.length; idx++) {
@@ -302,7 +319,15 @@ async function fetchDayAmountsFromSheet(
       continue;
     }
     const rawAmount = values[idx]?.[0] ?? 0;
-    dayAmounts[label] = normalizeAmountValue(rawAmount);
+    const rawFormula = formulas[idx]?.[0];
+    const formulaString =
+      typeof rawFormula === "string" && rawFormula.startsWith("=")
+        ? rawFormula
+        : null;
+    dayAmounts[label] = {
+      amount: normalizeAmountValue(rawAmount),
+      formula: formulaString,
+    };
   }
 
   return dayAmounts;
@@ -344,10 +369,14 @@ export function incrementDayAmountCache(
     return;
   }
 
-  const nextData = { ...existing.data };
-  const currentValue = nextData[category] ?? 0;
+  const nextData: DayAmountsMap = { ...existing.data };
+  const currentEntry = nextData[category];
+  const currentValue = currentEntry?.amount ?? 0;
   const updatedValue = parseFloat((currentValue + delta).toFixed(2));
-  nextData[category] = updatedValue;
+  nextData[category] = {
+    amount: updatedValue,
+    formula: null,
+  };
   writeDayAmountsCache(month, day, nextData);
 }
 
@@ -595,13 +624,11 @@ export async function addExpense(
   day: number,
   price: string,
   month: string
-): Promise<number> {
+): Promise<AddExpenseResult> {
   try {
-    // Konwertujemy cenę (obsługujemy przecinki i wyrażenia matematyczne)
-    const amount = safeEval(price);
-
-    // Zaokrąglij do 2 miejsc po przecinku
-    const roundedAmount = Math.round(amount * 100) / 100;
+    const trimmedPrice = price.trim();
+    const isFormula = trimmedPrice.startsWith("=");
+    let roundedAmount: number | null = null;
 
     // Ta funkcja wymaga OAuth 2.0 - należy zaimplementować backend
     // lub użyć Google Apps Script jako proxy
@@ -624,9 +651,18 @@ export async function addExpense(
       action: "addExpense",
       category,
       day: day.toString(),
-      amount: roundedAmount.toFixed(2),
       month,
     });
+
+    if (isFormula) {
+      params.set("mode", "formula");
+      params.set("formula", trimmedPrice);
+    } else {
+      const amount = safeEval(trimmedPrice);
+      roundedAmount = Math.round(amount * 100) / 100;
+      params.set("mode", "value");
+      params.set("amount", roundedAmount.toFixed(2));
+    }
 
     const response = await axios.get(`${APPS_SCRIPT_URL}?${params.toString()}`);
 
@@ -646,9 +682,10 @@ export async function addExpense(
     if (response.data.success !== true && !response.data.message) {
       console.warn("Nieoczekiwany format odpowiedzi:", response.data);
     }
-
     invalidateMonthCache(month);
-    return roundedAmount;
+    return isFormula && trimmedPrice
+      ? { mode: "formula", formula: trimmedPrice }
+      : { mode: "value", amount: roundedAmount ?? 0 };
   } catch (error) {
     console.error("Error adding expense:", error);
     if (error instanceof Error) {

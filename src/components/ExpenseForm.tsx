@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -43,7 +43,7 @@ import {
   setDayAmountsCache,
   removeDayAmountsCache,
 } from "@/services/googleSheets";
-import type { DayAmountsMap } from "@/services/googleSheets";
+import type { DayAmountsMap, AddExpenseResult } from "@/services/googleSheets";
 import type { Category } from "@/types/expense";
 import { CategoryCombobox } from "@/components/CategoryCombobox";
 
@@ -137,6 +137,156 @@ function usePullToRefresh(
   }, [enabled, handler, threshold]);
 }
 
+const NUMBER_SEGMENT_REGEX = /^\d+(?:\.\d{0,2})?$/;
+
+function tokenizeLinearExpression(
+  expression: string
+): Array<{ operator: "+" | "-"; value: string }> | null {
+  if (!expression?.length) {
+    return null;
+  }
+
+  const normalized = expression.replace(/,/g, ".").replace(/\s+/g, "");
+  if (!/^[0-9.+-]+$/.test(normalized)) {
+    return null;
+  }
+
+  const tokens: Array<{ operator: "+" | "-"; value: string }> = [];
+  let currentNumber = "";
+  let operator: "+" | "-" = "+";
+
+  for (let index = 0; index < normalized.length; index++) {
+    const char = normalized[index];
+    if (char === "+" || char === "-") {
+      if (currentNumber === "") {
+        if (index === 0) {
+          operator = char === "+" ? "+" : "-";
+          continue;
+        }
+        return null; // Disallow consecutive operators
+      }
+
+      if (!NUMBER_SEGMENT_REGEX.test(currentNumber)) {
+        return null;
+      }
+
+      tokens.push({ operator, value: currentNumber });
+      operator = char === "+" ? "+" : "-";
+      currentNumber = "";
+      continue;
+    }
+
+    if (char === "." && currentNumber.includes(".")) {
+      return null;
+    }
+
+    currentNumber += char;
+  }
+
+  if (currentNumber === "") {
+    return null;
+  }
+
+  if (!NUMBER_SEGMENT_REGEX.test(currentNumber)) {
+    return null;
+  }
+
+  tokens.push({ operator, value: currentNumber });
+  return tokens;
+}
+
+function evaluateLinearExpression(expression: string): number | null {
+  const tokens = tokenizeLinearExpression(expression);
+  if (!tokens) {
+    return null;
+  }
+
+  let total = 0;
+  for (const token of tokens) {
+    const numericValue = parseFloat(token.value);
+    if (!Number.isFinite(numericValue)) {
+      return null;
+    }
+    total =
+      token.operator === "+" ? total + numericValue : total - numericValue;
+  }
+
+  const rounded = Math.round(total * 100) / 100;
+  return parseFloat(rounded.toFixed(2));
+}
+
+function serializeLinearExpression(expression: string): string | null {
+  const tokens = tokenizeLinearExpression(expression);
+  if (!tokens) {
+    return null;
+  }
+
+  return tokens
+    .map((token, index) => {
+      const prefix =
+        index === 0 ? (token.operator === "-" ? "-" : "") : token.operator;
+      return `${prefix}${token.value}`;
+    })
+    .join("");
+}
+
+type ParsedPriceInput =
+  | { mode: "formula"; formula: string }
+  | { mode: "value"; amount: number };
+
+function parsePriceInput(value: string): ParsedPriceInput | null {
+  if (!value?.trim().length) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.startsWith("=")) {
+    const expression = trimmed.slice(1);
+    const serialized = serializeLinearExpression(expression);
+    if (!serialized) {
+      return null;
+    }
+    return { mode: "formula", formula: `=${serialized}` };
+  }
+
+  const amount = evaluateLinearExpression(trimmed);
+  if (amount === null) {
+    return null;
+  }
+
+  return { mode: "value", amount };
+}
+
+type CalculatorRibbonProps = {
+  onInsertSymbol: (symbol: "=" | "+" | "-") => void;
+  disabled?: boolean;
+};
+
+function CalculatorRibbon({ onInsertSymbol, disabled }: CalculatorRibbonProps) {
+  const buttons: Array<{ label: string; value: "=" | "+" | "-" }> = [
+    { label: "=", value: "=" },
+    { label: "+", value: "+" },
+    { label: "-", value: "-" },
+  ];
+
+  return (
+    <div className="mb-3 flex gap-2 rounded-2xl border border-gray-200 bg-gray-50 p-2">
+      {buttons.map((button) => (
+        <button
+          key={button.value}
+          type="button"
+          className="flex-1 rounded-xl bg-white py-2 text-lg font-semibold shadow-sm transition hover:bg-gray-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+          onClick={() => onInsertSymbol(button.value)}
+          disabled={disabled}
+          aria-label={`Wstaw znak ${button.label}`}
+        >
+          {button.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // Schemat walidacji formularza
 const expenseFormSchema = z.object({
   category: z.string().min(1, "Wybierz kategorię"),
@@ -144,56 +294,20 @@ const expenseFormSchema = z.object({
   price: z
     .string()
     .min(1, "Podaj koszt")
-    .refine(
-      (val) => {
-        // Usuń spacje i zamień przecinek na kropkę
-        const cleaned = val.replace(/\s/g, "").replace(/,/g, ".");
-        // Sprawdź czy to poprawna liczba lub wyrażenie matematyczne
-        return /^[\d.+\-*/()]+$/.test(cleaned);
-      },
-      { message: "Nieprawidłowy format kwoty" }
-    )
-    .refine(
-      (val) => {
-        try {
-          // Oblicz wynik wyrażenia
-          const cleaned = val.replace(/\s/g, "").replace(/,/g, ".");
-          const result = new Function("return " + cleaned)();
-          const numResult = parseFloat(result);
+    .superRefine((val, ctx) => {
+      if (parsePriceInput(val)) {
+        return;
+      }
 
-          // Sprawdź czy wynik ma maksymalnie 2 miejsca po przecinku
-          if (isNaN(numResult)) return false;
-
-          const rounded = Math.round(numResult * 100) / 100;
-          return Math.abs(numResult - rounded) < 0.0001; // tolerancja dla błędów zmiennoprzecinkowych
-        } catch {
-          return false;
-        }
-      },
-      { message: "Wynik obliczeń może mieć maksymalnie 2 miejsca po przecinku" }
-    ),
+      const isFormula = val.trim().startsWith("=");
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: isFormula
+          ? "Formuła może zawierać tylko liczby oraz znaki + lub - (maks. 2 miejsca po przecinku)."
+          : "Wpisz poprawne działanie używając cyfr oraz znaków + lub - (maks. 2 miejsca po przecinku).",
+      });
+    }),
 });
-
-function evaluatePriceExpression(value: string): number | null {
-  if (!value?.length) {
-    return null;
-  }
-
-  try {
-    const cleaned = value.replace(/\s/g, "").replace(/,/g, ".");
-    const result = new Function("return " + cleaned)();
-    const numResult = typeof result === "number" ? result : parseFloat(result);
-
-    if (!Number.isFinite(numResult)) {
-      return null;
-    }
-
-    const rounded = Math.round(numResult * 100) / 100;
-    return parseFloat(rounded.toFixed(2));
-  } catch {
-    return null;
-  }
-}
 
 const DAY_OPTIONS = Array.from({ length: 31 }, (_, index) =>
   (index + 1).toString()
@@ -247,14 +361,59 @@ export function ExpenseForm() {
     },
   });
 
+  const priceInputRef = useRef<HTMLInputElement | null>(null);
+
   const [selectedCategory, selectedDay] = useWatch({
     control: form.control,
     name: ["category", "day"],
   });
 
   const sanitizePriceInput = useCallback((value: string) => {
-    return value.replace(/[^0-9.,+\-*/()]/g, "");
+    if (!value) {
+      return "";
+    }
+
+    const trimmedValue = value.trimStart();
+    const hasLeadingEquals = trimmedValue.startsWith("=");
+    let sanitized = value.replace(/[^0-9.,+\-=\s]/g, "");
+    sanitized = sanitized.replace(/=/g, "");
+
+    if (hasLeadingEquals) {
+      sanitized = "=" + sanitized.trimStart();
+    }
+
+    return sanitized;
   }, []);
+
+  const handleInsertSymbol = useCallback(
+    (symbol: "=" | "+" | "-") => {
+      const currentValue = form.getValues("price") ?? "";
+      let nextValue: string;
+
+      if (symbol === "=") {
+        const withoutEquals = currentValue.replace(/=/g, "").trimStart();
+        nextValue = sanitizePriceInput(`=${withoutEquals}`);
+      } else {
+        nextValue = sanitizePriceInput(`${currentValue}${symbol}`);
+      }
+
+      form.setValue("price", nextValue, {
+        shouldDirty: true,
+        shouldValidate: true,
+      });
+
+      requestAnimationFrame(() => {
+        const input = priceInputRef.current;
+        if (!input) {
+          return;
+        }
+        const caretPos = nextValue.length;
+        input.focus();
+        input.setSelectionRange(caretPos, caretPos);
+      });
+    },
+    [form, sanitizePriceInput]
+  );
 
   usePreventPullToRefresh(isCategoryPickerOpen || isDayPickerOpen);
 
@@ -278,8 +437,14 @@ export function ExpenseForm() {
             });
 
             if (selectedCategory) {
-              const amount = amounts[selectedCategory] ?? 0;
-              form.setValue("price", amount > 0 ? amount.toString() : "");
+              const entry = amounts[selectedCategory];
+              if (entry?.formula) {
+                form.setValue("price", entry.formula);
+              } else if (entry && entry.amount !== 0) {
+                form.setValue("price", entry.amount.toString());
+              } else {
+                form.setValue("price", "");
+              }
             }
           })()
         : Promise.resolve();
@@ -308,13 +473,15 @@ export function ExpenseForm() {
 
   // TanStack Query mutation dla dodawania wydatków
   const addExpenseMutation = useMutation<
-    number,
+    AddExpenseResult,
     Error,
     {
       category: string;
       day: number;
       price: string;
       month: string;
+      rawPrice: string;
+      formulaResult: number | null;
     },
     {
       previousCategory: string;
@@ -342,17 +509,23 @@ export function ExpenseForm() {
         currentMonth,
         dayNumber
       );
-      const optimisticDelta = evaluatePriceExpression(variables.price);
+      const optimisticParse = parsePriceInput(variables.rawPrice);
+      const optimisticDelta =
+        optimisticParse && optimisticParse.mode === "value"
+          ? optimisticParse.amount
+          : null;
       let optimisticApplied = false;
 
       if (optimisticDelta !== null) {
         const nextSnapshot: DayAmountsMap = {
           ...(previousDaySnapshot ?? {}),
         };
-        const currentValue = nextSnapshot[variables.category] ?? 0;
-        nextSnapshot[variables.category] = parseFloat(
-          (currentValue + optimisticDelta).toFixed(2)
-        );
+        const currentEntry = nextSnapshot[variables.category];
+        const currentValue = currentEntry?.amount ?? 0;
+        nextSnapshot[variables.category] = {
+          amount: parseFloat((currentValue + optimisticDelta).toFixed(2)),
+          formula: null,
+        };
         setDayAmountsCache(currentMonth, dayNumber, nextSnapshot);
         setDayCacheVersion((version) => version + 1);
         optimisticApplied = true;
@@ -362,18 +535,29 @@ export function ExpenseForm() {
       return {
         previousCategory: variables.category,
         previousDay: variables.day.toString(),
-        previousPrice: variables.price,
+        previousPrice: variables.rawPrice,
         previousDaySnapshot,
         optimisticDay: dayNumber,
         optimisticCategory: variables.category,
         optimisticApplied,
       };
     },
-    onSuccess: (addedAmount: number, variables) => {
-      const formattedAmount = addedAmount.toFixed(2);
-      toast.success(
-        `Dodano ${formattedAmount} zł do kategorii ${variables.category}`
-      );
+    onSuccess: (result, variables) => {
+      if (result.mode === "formula") {
+        const computedValue = variables.formulaResult;
+        const formattedResult =
+          typeof computedValue === "number"
+            ? ` (wynik ${computedValue.toFixed(2)} zł)`
+            : "";
+        toast.success(
+          `Dodano formułę ${result.formula} do kategorii ${variables.category}${formattedResult}`
+        );
+      } else {
+        const formattedAmount = result.amount.toFixed(2);
+        toast.success(
+          `Dodano ${formattedAmount} zł do kategorii ${variables.category}`
+        );
+      }
       void getDayAmounts(currentMonth, variables.day, { forceRefresh: true });
       setDayCacheVersion((version) => version + 1);
     },
@@ -420,14 +604,34 @@ export function ExpenseForm() {
       if (isAddExpensePending) {
         return;
       }
+      const parsed = parsePriceInput(data.price);
+      if (!parsed) {
+        form.setError("price", {
+          type: "manual",
+          message:
+            "Wpisz poprawne działanie (cyfry oraz znaki +, - lub rozpocznij od = aby wysłać formułę)",
+        });
+        return;
+      }
+
+      const normalizedPrice =
+        parsed.mode === "value" ? parsed.amount.toFixed(2) : parsed.formula;
+
+      const formulaResult =
+        parsed.mode === "formula"
+          ? evaluateLinearExpression(parsed.formula.slice(1))
+          : null;
+
       mutateExpense({
         category: data.category,
-        day: parseInt(data.day),
-        price: data.price,
+        day: parseInt(data.day, 10),
+        price: normalizedPrice,
+        rawPrice: data.price,
         month: currentMonth,
+        formulaResult,
       });
     },
-    [currentMonth, isAddExpensePending, mutateExpense]
+    [currentMonth, form, isAddExpensePending, mutateExpense]
   );
 
   useEffect(() => {
@@ -458,8 +662,21 @@ export function ExpenseForm() {
         if (!amounts || !selectedCategory) {
           return;
         }
-        const amount = amounts[selectedCategory] ?? 0;
-        form.setValue("price", amount !== 0 ? amount.toString() : "");
+        const entry = amounts[selectedCategory];
+        if (!entry) {
+          form.setValue("price", "");
+          return;
+        }
+
+        if (entry.formula) {
+          form.setValue("price", entry.formula);
+          return;
+        }
+
+        form.setValue(
+          "price",
+          entry.amount !== 0 ? entry.amount.toString() : ""
+        );
       };
 
       if (cachedDayAmounts) {
@@ -605,43 +822,56 @@ export function ExpenseForm() {
                 <FormField
                   control={form.control}
                   name="price"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel className="flex items-center gap-2">
-                        <span className="text-lg">💵</span>
-                        <span>Kwota (PLN)</span>
-                      </FormLabel>
-                      <FormControl>
-                        <div className="relative">
-                          <Input
-                            type="text"
-                            inputMode="decimal"
-                            pattern="[0-9.,+\-*/()]*"
-                            placeholder="0.00"
-                            enterKeyHint="done"
-                            autoComplete="off"
-                            autoCorrect="off"
-                            {...field}
-                            onChange={(e) => {
-                              const sanitized = sanitizePriceInput(
-                                e.target.value
-                              );
-                              field.onChange(sanitized);
-                            }}
-                            disabled={isLoadingAmount}
-                            className="h-12 text-base pl-4 pr-12 font-medium"
-                          />
-                          <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">
-                            zł
+                  render={({ field }) => {
+                    const { ref: fieldRef, ...fieldProps } = field;
+                    return (
+                      <FormItem>
+                        <FormLabel className="flex items-center gap-2">
+                          <span className="text-lg">💵</span>
+                          <span>Kwota (PLN)</span>
+                        </FormLabel>
+                        <FormControl>
+                          <div className="space-y-2">
+                            <CalculatorRibbon
+                              onInsertSymbol={handleInsertSymbol}
+                              disabled={isLoadingAmount || isAddExpensePending}
+                            />
+                            <div className="relative">
+                              <Input
+                                type="text"
+                                inputMode="decimal"
+                                pattern="[0-9.,+\-= ]*"
+                                placeholder="0.00"
+                                enterKeyHint="done"
+                                autoComplete="off"
+                                autoCorrect="off"
+                                ref={(node) => {
+                                  priceInputRef.current = node;
+                                  fieldRef(node);
+                                }}
+                                {...fieldProps}
+                                onChange={(e) => {
+                                  const sanitized = sanitizePriceInput(
+                                    e.target.value
+                                  );
+                                  fieldProps.onChange(sanitized);
+                                }}
+                                disabled={isLoadingAmount}
+                                className="h-12 text-base pl-4 pr-12 font-medium"
+                              />
+                              <div className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 text-sm font-medium">
+                                zł
+                              </div>
+                              {isLoadingAmount && (
+                                <Loader2 className="absolute right-12 top-1/2 -translate-y-1/2 h-5 w-5 animate-spin text-blue-500" />
+                              )}
+                            </div>
                           </div>
-                          {isLoadingAmount && (
-                            <Loader2 className="absolute right-12 top-1/2 -translate-y-1/2 h-5 w-5 animate-spin text-blue-500" />
-                          )}
-                        </div>
-                      </FormControl>
-                      <FormMessage className="text-xs" />
-                    </FormItem>
-                  )}
+                        </FormControl>
+                        <FormMessage className="text-xs" />
+                      </FormItem>
+                    );
+                  }}
                 />
 
                 <div className="pt-2">

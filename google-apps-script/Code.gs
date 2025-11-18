@@ -28,10 +28,12 @@ function doGet(e) {
     if (action === "addExpense") {
       const category = params.category;
       const day = parseInt(params.day);
-      const amount = parseFloat(params.amount);
+      const amount = params.amount ? parseFloat(params.amount) : null;
       const month = params.month;
+      const formula = params.formula;
+      const mode = params.mode;
 
-      return handleAddExpense(category, day, amount, month);
+      return handleAddExpense(category, day, amount, month, formula, mode);
     }
 
     // Endpoint testowy
@@ -60,10 +62,10 @@ function doGet(e) {
 function doPost(e) {
   try {
     const data = JSON.parse(e.postData.contents);
-    const { action, category, day, amount, month } = data;
+    const { action, category, day, amount, month, formula, mode } = data;
 
     if (action === "addExpense") {
-      return handleAddExpense(category, day, amount, month);
+      return handleAddExpense(category, day, amount, month, formula, mode);
     }
 
     return ContentService.createTextOutput(
@@ -85,7 +87,7 @@ function doPost(e) {
 /**
  * Główna funkcja dodająca wydatek do arkusza
  */
-function handleAddExpense(category, day, amount, month) {
+function handleAddExpense(category, day, amount, month, formula, mode) {
   try {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(month);
 
@@ -122,18 +124,33 @@ function handleAddExpense(category, day, amount, month) {
     // Oblicz kolumnę na podstawie dnia (kolumna I = dzień 1, indeks 9)
     const dayColumnIndex = 8 + parseInt(day);
 
-    // Zapisz wartość
+    // Zapisz wartość lub formułę
     const cell = sheet.getRange(categoryRowIndex, dayColumnIndex);
-    cell.setValue(amount);
+    const hasFormula =
+      (mode === "formula" && formula) ||
+      (typeof formula === "string" && formula.trim().startsWith("="));
+
+    if (hasFormula) {
+      cell.setFormula(formula);
+    } else {
+      if (typeof amount !== "number" || isNaN(amount)) {
+        throw new Error("Brak prawidłowej kwoty do zapisania");
+      }
+      cell.setValue(amount);
+    }
 
     return ContentService.createTextOutput(
       JSON.stringify({
         success: true,
-        message: "Wydatek dodany pomyślnie",
+        message: hasFormula
+          ? "Formuła dodana pomyślnie"
+          : "Wydatek dodany pomyślnie",
         data: {
           category: category,
           day: day,
           amount: amount,
+          formula: hasFormula ? formula : null,
+          mode: hasFormula ? "formula" : "value",
           month: month,
           row: categoryRowIndex,
           column: dayColumnIndex,
