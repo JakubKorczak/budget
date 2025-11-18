@@ -1,15 +1,18 @@
 # Calculator Entry Plan
 
 ## Goal
+
 - Allow mobile users to enter simple expressions right above the numeric keyboard, supporting only addition, subtraction, and the equals sign.
 - Ensure Enter submits either a computed numeric result or the literal spreadsheet formula string when the entry begins with `=`.
 
 ## Current State (ExpenseForm)
+
 - `sanitizePriceInput` allows digits, separators, and `+ - * / ( )` which are later evaluated.
 - Validation in `expenseFormSchema.price` accepts any math expression and executes it via `new Function` before form submission.
 - Submission always evaluates the expression and sends the numeric result to Google Sheets through `addExpense`.
 
 ## Functional Requirements
+
 1. **Operator Ribbon**: Display a compact control bar above the keyboard with buttons `+`, `-`, `=` and possibly backspace/clear shortcuts.
 2. **Expression Editing**: Tapping a button appends the corresponding symbol to the active price input while preserving cursor focus.
 3. **Execution Rules**:
@@ -19,12 +22,14 @@
 5. **Accessibility**: Buttons must be reachable via keyboard focus, announce descriptive labels, and respect disabled states while loading cached amounts.
 
 ## UX / UI Details
+
 - Reuse the existing `Input` wrapper in `ExpenseForm` and insert a new `CalculatorRibbon` component just above it (inside the same `FormItem`).
 - Ribbon layout: horizontal flex, equal-width buttons, subtle border, contrasting background to differentiate it from the numeric field.
 - Provide haptic feedback hook (optional) or at least click animation to mirror native keypad buttons.
 - When the price field is disabled (spinner state), buttons should also be disabled.
 
 ## Technical Plan
+
 1. **Input Sanitization**
    - Update `sanitizePriceInput` to strip all characters except digits, decimal separators, whitespace, `+`, `-`, and leading `=`.
    - Normalize commas to dots immediately so validation operates on a single decimal separator.
@@ -52,6 +57,7 @@
    - Consider lightweight E2E or RTL tests to ensure the ribbon injects symbols correctly.
 
 ## Validation & QA Checklist
+
 - Typing `12+8-3` and pressing Enter submits `17.00` to Sheets.
 - Typing `=56+4-10` and pressing Enter submits the literal string and does not alter the optimistic cache.
 - Attempting to enter `*` or `/` results in immediate sanitization and a visible validation error if submitted.
@@ -59,6 +65,7 @@
 - Cached amount hydration still works and does not overwrite formula entries unexpectedly.
 
 ## Open Questions
+
 - Should Enter on external keyboards behave identically to tapping the on-screen checkmark? (Assumed yes.)
 - Do we need a visible hint informing users that starting with `=` sends the full formula? (Recommended to add helper text under the input.)
 - Should formulas update aggregated day caches, or remain transparent until Sheets recalculates? (Current plan: skip optimistic updates.)

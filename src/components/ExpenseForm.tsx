@@ -277,6 +277,8 @@ function CalculatorRibbon({ onInsertSymbol, disabled }: CalculatorRibbonProps) {
           type="button"
           className="flex-1 rounded-xl bg-white py-2 text-lg font-semibold shadow-sm transition hover:bg-gray-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
           onClick={() => onInsertSymbol(button.value)}
+          onMouseDown={(event) => event.preventDefault()}
+          onTouchStart={(event) => event.preventDefault()}
           disabled={disabled}
           aria-label={`Wstaw znak ${button.label}`}
         >
