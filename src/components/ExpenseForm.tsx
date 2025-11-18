@@ -233,6 +233,10 @@ function serializeLinearExpression(expression: string): string | null {
     .join("");
 }
 
+function formatDecimalDotsToCommas(value: string): string {
+  return value.replace(/\.(?=\d)/g, ",");
+}
+
 type ParsedPriceInput =
   | { mode: "formula"; formula: string }
   | { mode: "value"; amount: number };
@@ -495,7 +499,10 @@ export function ExpenseForm() {
             if (selectedCategory) {
               const entry = amounts[selectedCategory];
               if (entry?.formula) {
-                form.setValue("price", entry.formula);
+                form.setValue(
+                  "price",
+                  formatDecimalDotsToCommas(entry.formula)
+                );
               } else if (entry && entry.amount !== 0) {
                 form.setValue("price", entry.amount.toString());
               } else {
@@ -601,12 +608,13 @@ export function ExpenseForm() {
     onSuccess: (result, variables) => {
       if (result.mode === "formula") {
         const computedValue = variables.formulaResult;
+        const localizedFormula = formatDecimalDotsToCommas(result.formula);
         const formattedResult =
           typeof computedValue === "number"
             ? ` (wynik ${computedValue.toFixed(2)} zł)`
             : "";
         toast.success(
-          `Dodano formułę ${result.formula} do kategorii ${variables.category}${formattedResult}`
+          `Dodano formułę ${localizedFormula} do kategorii ${variables.category}${formattedResult}`
         );
       } else {
         const formattedAmount = result.amount.toFixed(2);
@@ -671,7 +679,9 @@ export function ExpenseForm() {
       }
 
       const normalizedPrice =
-        parsed.mode === "value" ? parsed.amount.toFixed(2) : parsed.formula;
+        parsed.mode === "value"
+          ? parsed.amount.toFixed(2)
+          : formatDecimalDotsToCommas(parsed.formula);
 
       const formulaResult =
         parsed.mode === "formula"
@@ -725,7 +735,7 @@ export function ExpenseForm() {
         }
 
         if (entry.formula) {
-          form.setValue("price", entry.formula);
+          form.setValue("price", formatDecimalDotsToCommas(entry.formula));
           return;
         }
 
