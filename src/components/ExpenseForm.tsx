@@ -465,10 +465,7 @@ export function ExpenseForm() {
         return;
       }
 
-      if (
-        typeof document !== "undefined" &&
-        document.activeElement !== input
-      ) {
+      if (typeof document !== "undefined" && document.activeElement !== input) {
         setIsPriceFocused(false);
       }
     });
@@ -773,7 +770,7 @@ export function ExpenseForm() {
 
   const showDesktopRibbon = !isIosDevice;
   const showMobileRibbon = isIosDevice && isPriceFocused;
-  const keyboardAwareBottom = Math.max(20, keyboardOffset + 20);
+  const keyboardAwareBottom = Math.max(12, keyboardOffset + 12);
 
   return (
     <>
@@ -983,6 +980,4 @@ export function ExpenseForm() {
         : null}
     </>
   );
-
-  
 }
