@@ -770,7 +770,7 @@ export function ExpenseForm() {
 
   const showDesktopRibbon = !isIosDevice;
   const showMobileRibbon = isIosDevice && isPriceFocused;
-  const keyboardAwareBottom = Math.max(-15, keyboardOffset - 15);
+  const keyboardAwareBottom = Math.max(-22, keyboardOffset - 22);
 
   return (
     <>
