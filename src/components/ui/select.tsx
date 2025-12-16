@@ -62,6 +62,7 @@ function SelectContent({
   side = "bottom",
   sideOffset = 6,
   avoidCollisions = false,
+  style,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
   return (
