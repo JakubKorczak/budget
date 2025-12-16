@@ -63,6 +63,8 @@ function SelectContent({
   sideOffset = 6,
   avoidCollisions = false,
   style,
+  sticky = "always",
+  collisionPadding = 0,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
   return (
@@ -92,6 +94,8 @@ function SelectContent({
         side={side}
         sideOffset={sideOffset}
         avoidCollisions={avoidCollisions}
+        sticky={sticky}
+        collisionPadding={collisionPadding}
         {...props}
       >
         <SelectScrollUpButton />
