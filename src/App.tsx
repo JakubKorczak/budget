@@ -60,7 +60,7 @@ function App() {
         <div
           className="container mx-auto px-3 sm:px-4 max-w-md"
           style={{
-            paddingTop: "max(0.75rem, env(safe-area-inset-top))",
+            paddingTop: "8px",
             paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
           }}
         >
