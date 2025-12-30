@@ -119,6 +119,8 @@ export function CategoryCombobox({
       <PopoverContent
         className="p-0"
         align="start"
+        side="bottom"
+        avoidCollisions={false}
         style={{
           width: contentWidth ?? undefined,
           maxWidth: contentWidth ?? undefined,
