@@ -9,24 +9,51 @@
   --sar: env(safe-area-inset-right);
   --sab: env(safe-area-inset-bottom);
   --sal: env(safe-area-inset-left);
+  --app-screen-background: linear-gradient(
+    to bottom right,
+    #eff6ff,
+    #eef2ff,
+    #faf5ff
+  );
+  --app-screen-fallback: #faf5ff;
+}
+
+.dark {
+  --app-screen-background: linear-gradient(
+    to bottom right,
+    #020617,
+    #0f172a,
+    #1e1b4b
+  );
+  --app-screen-fallback: #1e1b4b;
 }
 
 /* Napraw wysokość viewport na iPhone */
 html,
 body {
   height: 100%;
-  height: 100dvh; /* Dynamic viewport height for mobile */
+  min-height: 100vh;
+  min-height: 100lvh;
   overflow: hidden;
   /* Prevent iOS bounce */
   position: fixed;
   width: 100%;
   overscroll-behavior: none;
+  background-color: var(--app-screen-fallback);
+  background-image: var(--app-screen-background);
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 #root {
   height: 100%;
-  height: 100dvh;
+  min-height: 100vh;
+  min-height: 100lvh;
   overflow: hidden;
+  background-color: var(--app-screen-fallback);
+  background-image: var(--app-screen-background);
+  background-repeat: no-repeat;
+  background-size: cover;
 }
 
 /*
@@ -35,7 +62,8 @@ body {
  */
 .budget-app-shell {
   min-height: 100%;
-  min-height: 100dvh;
+  min-height: 100vh;
+  min-height: 100lvh;
 }
 
 .budget-app-viewport {
@@ -48,7 +76,8 @@ body {
 
 .login-screen {
   min-height: 100%;
-  min-height: 100dvh;
+  min-height: 100vh;
+  min-height: 100lvh;
   padding-top: calc(env(safe-area-inset-top) + 1rem);
   padding-right: max(1rem, env(safe-area-inset-right));
   padding-bottom: calc(env(safe-area-inset-bottom) + 1rem);
@@ -161,8 +190,7 @@ body {
   padding: 0;
   min-width: 320px;
   min-height: 100vh;
-  min-height: 100dvh;
-  background-color: var(--background);
+  min-height: 100lvh;
   color: var(--foreground);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

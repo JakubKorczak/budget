@@ -27,5 +27,5 @@ export function applyTheme(theme: AppTheme) {
 
   document
     .querySelector('meta[name="theme-color"]')
-    ?.setAttribute("content", isDark ? "#111827" : "#3b82f6");
+    ?.setAttribute("content", isDark ? "#1e1b4b" : "#faf5ff");
 }
