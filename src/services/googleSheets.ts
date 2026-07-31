@@ -1,14 +1,31 @@
 import axios from "axios";
 import type { Category } from "@/types/expense";
 import { MONTHS } from "@/types/expense";
+import {
+  applyPendingQueueOverlay,
+  clearBudgetDaySnapshots,
+  getBudgetDaySnapshot,
+  putBudgetDaySnapshot,
+  type BudgetQueueRecord,
+  type CanonicalCellValue,
+} from "./budgetDb";
 
 const SPREADSHEET_ID = import.meta.env.VITE_GOOGLE_SPREADSHEET_ID;
 const API_KEY = import.meta.env.VITE_GOOGLE_API_KEY;
 
 const BASE_URL = "https://sheets.googleapis.com/v4/spreadsheets";
+let postTransportUnavailable = false;
 
 type SheetRowData = {
-  values?: Array<{ formattedValue?: string }>;
+  values?: Array<{
+    formattedValue?: string;
+    userEnteredValue?: {
+      numberValue?: number;
+      stringValue?: string;
+      formulaValue?: string;
+    };
+    effectiveValue?: { numberValue?: number; stringValue?: string };
+  }>;
 };
 
 interface CategoryGridCacheEntry {
@@ -20,6 +37,7 @@ interface CategoryGridCacheEntry {
 export type DayAmountEntry = {
   amount: number;
   formula: string | null;
+  isEmpty?: boolean;
 };
 
 export type DayAmountsMap = Record<string, DayAmountEntry>;
@@ -28,6 +46,18 @@ export type AddBudgetEntryResult =
   | { mode: "value"; amount: number }
   | { mode: "formula"; formula: string };
 export type AddExpenseResult = AddBudgetEntryResult;
+export type ApplyBudgetEntryStatus =
+  | "applied"
+  | "alreadyApplied"
+  | "conflict"
+  | "invalid"
+  | "retryable";
+export interface ApplyBudgetEntryResult {
+  commandId: string;
+  status: ApplyBudgetEntryStatus;
+  current: CanonicalCellValue;
+  message?: string;
+}
 
 interface DayAmountsCacheEntry {
   timestamp: number;
@@ -38,6 +68,10 @@ interface DayAmountsCacheEntry {
 
 const categoryGridCache = new Map<string, CategoryGridCacheEntry>();
 const categoryRowValuesCache = new Map<string, (string | number | null)[]>();
+const daySnapshotRequests = new Map<
+  string,
+  Promise<{ expense: DayAmountsMap; salary: DayAmountsMap }>
+>();
 
 const CATEGORY_CACHE_KEY = "budget:categories:v2";
 const SALARY_CATEGORIES_CACHE_PREFIX = "budget:salary-categories:v1";
@@ -187,7 +221,12 @@ function purgeOtherDayAmountCaches(keepKey: string) {
     const keysToRemove: string[] = [];
     for (let i = 0; i < window.localStorage.length; i++) {
       const key = window.localStorage.key(i);
-      if (key && key.startsWith(DAY_AMOUNTS_CACHE_PREFIX) && key !== keepKey) {
+      const keepSuffix = keepKey.split(":").slice(-2).join(":");
+      if (
+        key &&
+        key.startsWith(DAY_AMOUNTS_CACHE_PREFIX) &&
+        !key.endsWith(keepSuffix)
+      ) {
         keysToRemove.push(key);
       }
     }
@@ -197,7 +236,7 @@ function purgeOtherDayAmountCaches(keepKey: string) {
   }
 }
 
-export function clearAllDayAmountCaches(): void {
+export async function clearAllDayAmountCaches(): Promise<void> {
   if (typeof window === "undefined") {
     return;
   }
@@ -211,6 +250,7 @@ export function clearAllDayAmountCaches(): void {
       }
     }
     keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+    await clearBudgetDaySnapshots();
   } catch (error) {
     console.warn(
       "[Sheets] Nie udało się wyczyścić cache dziennych kwot",
@@ -300,53 +340,98 @@ function normalizeAmountValue(
   return parseFloat(numeric.toFixed(2));
 }
 
-async function fetchDayAmountsFromSheet(
-  month: string,
-  day: number,
-  entryType: BudgetEntryType
-): Promise<DayAmountsMap> {
-  const { rowData, startRow } = await getCategoryGrid(month, entryType);
-  if (!rowData.length) {
-    return {};
-  }
+interface GoogleGridData {
+  startRow?: number;
+  rowData?: SheetRowData[];
+}
 
+async function fetchBudgetDaySnapshotFromSheet(
+  month: string,
+  day: number
+): Promise<{ expense: DayAmountsMap; salary: DayAmountsMap }> {
   const dayIndex = Math.max(1, Math.min(31, day));
   const dayColumnIndex = 8 + (dayIndex - 1);
   const columnLetter = getColumnLetter(dayColumnIndex);
-  const endRow = startRow + rowData.length - 1;
-  const dayRange = `${month}!${columnLetter}${startRow}:${columnLetter}${endRow}`;
-  const valuesUrl = `${BASE_URL}/${SPREADSHEET_ID}/values/${dayRange}?valueRenderOption=UNFORMATTED_VALUE&key=${API_KEY}`;
-  const formulaUrl = `${BASE_URL}/${SPREADSHEET_ID}/values/${dayRange}?valueRenderOption=FORMULA&key=${API_KEY}`;
+  const ranges = [
+    `${month}!B58:${columnLetter}70`,
+    `${month}!B79:${columnLetter}257`,
+  ];
+  const params = new URLSearchParams({
+    includeGridData: "true",
+    fields:
+      "sheets(properties(title),data(startRow,rowData(values(formattedValue,userEnteredValue,effectiveValue))))",
+    key: API_KEY,
+  });
+  ranges.forEach((range) => params.append("ranges", range));
 
-  const [valuesResponse, formulaResponse] = await Promise.all([
-    axios.get(valuesUrl),
-    axios.get(formulaUrl),
-  ]);
+  const response = await axios.get(`${BASE_URL}/${SPREADSHEET_ID}?${params}`);
+  const sheet = (response.data.sheets || []).find(
+    (candidate: { properties?: { title?: string } }) =>
+      candidate.properties?.title === month
+  );
+  const gridData: GoogleGridData[] = sheet?.data || [];
+  const salaryGrid = gridData.find((grid) => grid.startRow === 57);
+  const expenseGrid = gridData.find((grid) => grid.startRow === 78);
+  const valueOffset = dayColumnIndex - 1;
 
-  const values: Array<Array<string | number>> =
-    valuesResponse.data.values || [];
-  const formulas: Array<Array<string | number>> =
-    formulaResponse.data.values || [];
-  const dayAmounts: DayAmountsMap = {};
+  return {
+    salary: parseDayGrid(salaryGrid?.rowData ?? [], valueOffset),
+    expense: parseDayGrid(expenseGrid?.rowData ?? [], valueOffset),
+  };
+}
 
-  for (let idx = 0; idx < rowData.length; idx++) {
-    const label = rowData[idx]?.values?.[0]?.formattedValue?.trim();
-    if (!label) {
-      continue;
-    }
-    const rawAmount = values[idx]?.[0] ?? 0;
-    const rawFormula = formulas[idx]?.[0];
-    const formulaString =
-      typeof rawFormula === "string" && rawFormula.startsWith("=")
-        ? rawFormula
-        : null;
-    dayAmounts[label] = {
-      amount: normalizeAmountValue(rawAmount),
-      formula: formulaString,
-    };
+async function fetchAndCacheBudgetDaySnapshot(
+  month: string,
+  day: number
+): Promise<{ expense: DayAmountsMap; salary: DayAmountsMap }> {
+  const key = `${month}:${day}`;
+  const inFlight = daySnapshotRequests.get(key);
+  if (inFlight) {
+    return inFlight;
   }
 
-  return dayAmounts;
+  const request = (async () => {
+    const fetched = await fetchBudgetDaySnapshotFromSheet(month, day);
+    const withPendingWrites = await applyPendingQueueOverlay({
+      month,
+      day,
+      ...fetched,
+    });
+    await putBudgetDaySnapshot(withPendingWrites);
+    writeDayAmountsCache(month, day, withPendingWrites.expense, "expense");
+    writeDayAmountsCache(month, day, withPendingWrites.salary, "salary");
+    return {
+      expense: withPendingWrites.expense,
+      salary: withPendingWrites.salary,
+    };
+  })().finally(() => {
+    daySnapshotRequests.delete(key);
+  });
+  daySnapshotRequests.set(key, request);
+  return request;
+}
+
+function parseDayGrid(
+  rowData: SheetRowData[],
+  valueOffset: number
+): DayAmountsMap {
+  const amounts: DayAmountsMap = {};
+  for (const row of rowData) {
+    const label = row.values?.[0]?.formattedValue?.trim();
+    if (!label || label === ".") {
+      continue;
+    }
+    const valueCell = row.values?.[valueOffset];
+    const formula = valueCell?.userEnteredValue?.formulaValue ?? null;
+    const effectiveAmount =
+      valueCell?.effectiveValue?.numberValue ?? valueCell?.formattedValue ?? 0;
+    amounts[label] = {
+      amount: normalizeAmountValue(effectiveAmount),
+      formula,
+      isEmpty: !valueCell?.userEnteredValue,
+    };
+  }
+  return amounts;
 }
 
 export async function getDayAmounts(
@@ -365,11 +450,17 @@ export async function getDayAmounts(
     if (cached) {
       return cached.data;
     }
+
+    const persisted = await getBudgetDaySnapshot(month, day);
+    if (persisted) {
+      writeDayAmountsCache(month, day, persisted.expense, "expense");
+      writeDayAmountsCache(month, day, persisted.salary, "salary");
+      return persisted[entryType];
+    }
   }
 
-  const fetched = await fetchDayAmountsFromSheet(month, day, entryType);
-  writeDayAmountsCache(month, day, fetched, entryType);
-  return fetched;
+  const fetched = await fetchAndCacheBudgetDaySnapshot(month, day);
+  return fetched[entryType];
 }
 
 export function incrementDayAmountCache(
@@ -678,19 +769,6 @@ async function getCategoryRowValues(
   return values;
 }
 
-function invalidateMonthCache(month: string) {
-  for (const key of categoryGridCache.keys()) {
-    if (key.endsWith(`:${month}`)) {
-      categoryGridCache.delete(key);
-    }
-  }
-  for (const key of categoryRowValuesCache.keys()) {
-    if (key.startsWith(`${month}:`)) {
-      categoryRowValuesCache.delete(key);
-    }
-  }
-}
-
 /**
  * Konwertuje indeks kolumny (0-based) na nazwę kolumny Excel (A, B, ..., Z, AA, AB, ...)
  * Przykład: 0 -> A, 25 -> Z, 26 -> AA, 27 -> AB
@@ -854,7 +932,6 @@ export async function addBudgetEntry(
     if (response.data.success !== true && !response.data.message) {
       console.warn("Nieoczekiwany format odpowiedzi:", response.data);
     }
-    invalidateMonthCache(month);
     return isFormula && trimmedPrice
       ? { mode: "formula", formula: trimmedPrice }
       : { mode: "value", amount: roundedAmount ?? 0 };
@@ -868,6 +945,154 @@ export async function addBudgetEntry(
         entryType === "salary" ? "wynagrodzenia" : "wydatku"
       }`
     );
+  }
+}
+
+export async function applyBudgetEntryCommands(
+  commands: BudgetQueueRecord[]
+): Promise<ApplyBudgetEntryResult[]> {
+  const appsScriptUrl = import.meta.env.VITE_APPS_SCRIPT_URL;
+  if (!appsScriptUrl) {
+    throw new Error("Brak konfiguracji Apps Script URL");
+  }
+  const batch = commands.slice(0, 10);
+  if (!postTransportUnavailable) {
+    let response: Response;
+    try {
+      response = await fetch(appsScriptUrl, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify({
+          action: "applyBudgetEntries",
+          protocolVersion: 2,
+          commands: batch.map(serializeQueueCommand),
+        }),
+        signal: AbortSignal.timeout(15_000),
+      });
+    } catch (error) {
+      console.warn(
+        "[Sheets] Transport POST niedostępny, używam zgodnego fallbacku GET",
+        error
+      );
+      postTransportUnavailable = true;
+    }
+    if (!postTransportUnavailable) {
+      if (!response!.ok) {
+        if (response!.status === 404 || response!.status === 405) {
+          postTransportUnavailable = true;
+        } else if (response!.status >= 400 && response!.status < 500 && response!.status !== 429) {
+          return batch.map((command) => ({
+            commandId: command.commandId,
+            status: "invalid",
+            current: command.expected,
+            message: `Apps Script odpowiedział kodem ${response!.status}`,
+          }));
+        } else {
+          throw new Error(`Apps Script odpowiedział kodem ${response!.status}`);
+        }
+      } else {
+        const payload = (await response!.json()) as {
+          success?: boolean;
+          results?: ApplyBudgetEntryResult[];
+          error?: string;
+        };
+        if (payload.success && Array.isArray(payload.results)) {
+          return payload.results;
+        }
+        if (
+          payload.error === "Unknown action" ||
+          payload.error === "Unsupported protocol version"
+        ) {
+          postTransportUnavailable = true;
+        } else {
+          throw new Error(payload.error || "Nieprawidłowa odpowiedź Apps Script v2");
+        }
+      }
+    }
+  }
+
+  return Promise.all(batch.map((command) => applyLegacyQueueCommand(appsScriptUrl, command)));
+}
+
+function serializeQueueCommand(command: BudgetQueueRecord) {
+  return {
+    commandId: command.commandId,
+    entryType: command.entryType,
+    month: command.month,
+    day: command.day,
+    category: command.category,
+    expected: command.expected,
+    desired: command.desired,
+  };
+}
+
+async function applyLegacyQueueCommand(
+  appsScriptUrl: string,
+  command: BudgetQueueRecord
+): Promise<ApplyBudgetEntryResult> {
+  const params = new URLSearchParams({
+    action: command.entryType === "salary" ? "addSalary" : "addExpense",
+    commandId: command.commandId,
+    category: command.category,
+    day: command.day.toString(),
+    month: command.month,
+    mode: command.desired.mode,
+  });
+  if (command.desired.mode === "formula") {
+    params.set("formula", command.desired.formula);
+  } else {
+    params.set("amount", command.desired.amount.toFixed(2));
+  }
+
+  try {
+    const response = await axios.get(`${appsScriptUrl}?${params}`, {
+      timeout: 15_000,
+    });
+    if (response.data?.retryable) {
+      return {
+        commandId: command.commandId,
+        status: "retryable",
+        current: command.expected,
+        message: response.data?.error || "Apps Script jest zajęty",
+      };
+    }
+    if (response.data?.success === false || response.data?.error) {
+      return {
+        commandId: command.commandId,
+        status: "invalid",
+        current: command.expected,
+        message: response.data?.error || "Apps Script odrzucił operację",
+      };
+    }
+    if (response.data?.success !== true) {
+      return {
+        commandId: command.commandId,
+        status: "invalid",
+        current: command.expected,
+        message: "Wdrożony Apps Script nie obsługuje tej operacji",
+      };
+    }
+    return {
+      commandId: command.commandId,
+      status: "applied",
+      current: command.desired,
+    };
+  } catch (error) {
+    if (
+      axios.isAxiosError(error) &&
+      error.response?.status &&
+      error.response.status >= 400 &&
+      error.response.status < 500 &&
+      error.response.status !== 429
+    ) {
+      return {
+        commandId: command.commandId,
+        status: "invalid",
+        current: command.expected,
+        message: `Apps Script odpowiedział kodem ${error.response.status}`,
+      };
+    }
+    throw error;
   }
 }
 

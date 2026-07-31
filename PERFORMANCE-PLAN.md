@@ -81,3 +81,12 @@
 3. Zweryfikować Service Workera na środowisku produkcyjnym (offline test + kontrola budowy), a wynik i checklistę dołączyć do `DEPLOYMENT.md`.
 4. Podłączyć Lighthouse CI do pipeline’u (`lint → test → build → lhci`) i ustawić progi TTI < 3 s.
 5. Zmierzyć TTI i czas reakcji formularza na urządzeniach mobilnych po wdrożonych zmianach oraz zarchiwizować wyniki w repo.
+
+## 9. Aktualizacja: trwała kolejka i szybki zapis
+
+- Zapis wydatków i wynagrodzeń trafia najpierw do trwałego outboxu IndexedDB, więc formularz nie czeka na Apps Script i działa offline.
+- Operacje ustawiają końcową wartość komórki. Niewysłane operacje tej samej komórki są scalane, a wartość bazowa służy do wykrywania konfliktu.
+- Dane dnia są pobierane jednym `spreadsheets.get` dla zakresów wynagrodzeń i wydatków oraz przechowywane w maksymalnie 62 snapshotach przez 6 godzin.
+- Po udanym zapisie nie jest wykonywany odczyt weryfikacyjny ani invalidacja mapy kategorii.
+- Apps Script v2 obsługuje `applyBudgetEntries`, `validateOnly`, blokadę skryptu, cache map kategorii i odpowiedzi `applied`, `alreadyApplied`, `conflict`, `invalid`, `retryable`.
+- Domyślny batch produkcyjny wynosi 1. Po obserwacji wdrożenia można ustawić `VITE_QUEUE_BATCH_SIZE=10`.

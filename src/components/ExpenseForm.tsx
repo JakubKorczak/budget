@@ -2,9 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
+import {
+  evaluateLinearExpression,
+  formatDecimalDotsToCommas,
+  parsePriceInput,
+} from "@/lib/budgetExpression";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as z from "zod";
 import {
   Banknote,
@@ -46,7 +51,6 @@ import {
 import {
   getCategories,
   getSalaryCategories,
-  addBudgetEntry,
   getCurrentMonth,
   getCachedCategoriesSnapshot,
   getCachedSalaryCategoriesSnapshot,
@@ -55,14 +59,16 @@ import {
   clearCategoriesCache,
   clearSalaryCategoriesCache,
   clearAllDayAmountCaches,
-  setDayAmountsCache,
-  removeDayAmountsCache,
 } from "@/services/googleSheets";
-import type {
-  DayAmountsMap,
-  AddBudgetEntryResult,
-  BudgetEntryType,
-} from "@/services/googleSheets";
+import type { DayAmountsMap, BudgetEntryType } from "@/services/googleSheets";
+import {
+  discardBudgetQueueRecord,
+  enqueueBudgetEntry,
+  overwriteBudgetQueueConflict,
+  retryBudgetQueueRecord,
+  subscribeBudgetQueue,
+  type BudgetQueueSnapshot,
+} from "@/services/budgetQueue";
 import { MONTHS, type Category } from "@/types/expense";
 import { CategoryCombobox } from "@/components/CategoryCombobox";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -158,130 +164,6 @@ function usePullToRefresh(
   }, [enabled, handler, threshold]);
 }
 
-const NUMBER_SEGMENT_REGEX = /^\d+(?:\.\d{0,2})?$/;
-
-function tokenizeLinearExpression(
-  expression: string
-): Array<{ operator: "+" | "-"; value: string }> | null {
-  if (!expression?.length) {
-    return null;
-  }
-
-  const normalized = expression.replace(/,/g, ".").replace(/\s+/g, "");
-  if (!/^[0-9.+-]+$/.test(normalized)) {
-    return null;
-  }
-
-  const tokens: Array<{ operator: "+" | "-"; value: string }> = [];
-  let currentNumber = "";
-  let operator: "+" | "-" = "+";
-
-  for (let index = 0; index < normalized.length; index++) {
-    const char = normalized[index];
-    if (char === "+" || char === "-") {
-      if (currentNumber === "") {
-        if (index === 0) {
-          operator = char === "+" ? "+" : "-";
-          continue;
-        }
-        return null; // Disallow consecutive operators
-      }
-
-      if (!NUMBER_SEGMENT_REGEX.test(currentNumber)) {
-        return null;
-      }
-
-      tokens.push({ operator, value: currentNumber });
-      operator = char === "+" ? "+" : "-";
-      currentNumber = "";
-      continue;
-    }
-
-    if (char === "." && currentNumber.includes(".")) {
-      return null;
-    }
-
-    currentNumber += char;
-  }
-
-  if (currentNumber === "") {
-    return null;
-  }
-
-  if (!NUMBER_SEGMENT_REGEX.test(currentNumber)) {
-    return null;
-  }
-
-  tokens.push({ operator, value: currentNumber });
-  return tokens;
-}
-
-function evaluateLinearExpression(expression: string): number | null {
-  const tokens = tokenizeLinearExpression(expression);
-  if (!tokens) {
-    return null;
-  }
-
-  let total = 0;
-  for (const token of tokens) {
-    const numericValue = parseFloat(token.value);
-    if (!Number.isFinite(numericValue)) {
-      return null;
-    }
-    total =
-      token.operator === "+" ? total + numericValue : total - numericValue;
-  }
-
-  const rounded = Math.round(total * 100) / 100;
-  return parseFloat(rounded.toFixed(2));
-}
-
-function serializeLinearExpression(expression: string): string | null {
-  const tokens = tokenizeLinearExpression(expression);
-  if (!tokens) {
-    return null;
-  }
-
-  return tokens
-    .map((token, index) => {
-      const prefix =
-        index === 0 ? (token.operator === "-" ? "-" : "") : token.operator;
-      return `${prefix}${token.value}`;
-    })
-    .join("");
-}
-
-function formatDecimalDotsToCommas(value: string): string {
-  return value.replace(/\.(?=\d)/g, ",");
-}
-
-type ParsedPriceInput =
-  | { mode: "formula"; formula: string }
-  | { mode: "value"; amount: number };
-
-function parsePriceInput(value: string): ParsedPriceInput | null {
-  if (!value?.trim().length) {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  if (trimmed.startsWith("=")) {
-    const expression = trimmed.slice(1);
-    const serialized = serializeLinearExpression(expression);
-    if (!serialized) {
-      return null;
-    }
-    return { mode: "formula", formula: `=${serialized}` };
-  }
-
-  const amount = evaluateLinearExpression(trimmed);
-  if (amount === null) {
-    return null;
-  }
-
-  return { mode: "value", amount };
-}
-
 type CalculatorRibbonProps = {
   onInsertSymbol: (symbol: "=" | "+" | "-") => void;
   disabled?: boolean;
@@ -359,9 +241,25 @@ export function ExpenseForm({
   const [isPriceFocused, setIsPriceFocused] = useState(false);
   const [isIosDevice, setIsIosDevice] = useState(false);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
+  const [isEnqueueing, setIsEnqueueing] = useState(false);
+  const [queueSnapshot, setQueueSnapshot] = useState<BudgetQueueSnapshot>({
+    pending: 0,
+    syncing: 0,
+    problems: [],
+    offline: typeof navigator !== "undefined" && !navigator.onLine,
+  });
   const [selectedMonth, setSelectedMonth] = useState(() => getCurrentMonth());
   const queryClient = useQueryClient();
   const isSalary = entryType === "salary";
+
+  useEffect(
+    () =>
+      subscribeBudgetQueue((snapshot) => {
+        setQueueSnapshot(snapshot);
+        setDayCacheVersion((version) => version + 1);
+      }),
+    []
+  );
 
   const cachedCategories = useMemo(
     () =>
@@ -544,7 +442,7 @@ export function ExpenseForm({
       } else {
         clearCategoriesCache();
       }
-      clearAllDayAmountCaches();
+      await clearAllDayAmountCaches();
 
       const parsedDay = selectedDay ? parseInt(selectedDay, 10) : NaN;
       const refreshDayAmounts = Number.isFinite(parsedDay)
@@ -599,170 +497,17 @@ export function ExpenseForm({
     selectedMonth,
   ]);
 
-  // TanStack Query mutation dla zapisu wpisów budżetowych
-  const addExpenseMutation = useMutation<
-    AddBudgetEntryResult,
-    Error,
-    {
-      category: string;
-      day: number;
-      price: string;
-      month: string;
-      rawPrice: string;
-      formulaResult: number | null;
-    },
-    {
-      previousCategory: string;
-      previousDay: string;
-      previousPrice: string;
-      previousDaySnapshot: DayAmountsMap | null;
-      optimisticMonth: string;
-      optimisticDay: number;
-      optimisticCategory: string;
-      optimisticApplied: boolean;
-    }
-  >({
-    mutationFn: async (data) => {
-      return addBudgetEntry(
-        data.category,
-        data.day,
-        data.price,
-        data.month,
-        entryType
-      );
-    },
-    onMutate: async (variables) => {
-      // Optimistic update - natychmiastowy reset formularza (bez czekania na API)
-      form.reset({
-        category: "",
-        day: new Date().getDate().toString(),
-        price: "",
-      });
-
-      const dayNumber = variables.day;
-      const previousDaySnapshot = getCachedDayAmountsSnapshot(
-        variables.month,
-        dayNumber,
-        entryType
-      );
-      const optimisticParse = parsePriceInput(variables.rawPrice);
-      const optimisticDelta =
-        optimisticParse && optimisticParse.mode === "value"
-          ? optimisticParse.amount
-          : null;
-      let optimisticApplied = false;
-
-      if (optimisticDelta !== null) {
-        const nextSnapshot: DayAmountsMap = {
-          ...(previousDaySnapshot ?? {}),
-        };
-        const currentEntry = nextSnapshot[variables.category];
-        const currentValue = currentEntry?.amount ?? 0;
-        nextSnapshot[variables.category] = {
-          amount: parseFloat((currentValue + optimisticDelta).toFixed(2)),
-          formula: null,
-        };
-        setDayAmountsCache(
-          variables.month,
-          dayNumber,
-          nextSnapshot,
-          entryType
-        );
-        setDayCacheVersion((version) => version + 1);
-        optimisticApplied = true;
-      }
-
-      // Zwróć poprzednie dane na wypadek błędu (rollback)
-      return {
-        previousCategory: variables.category,
-        previousDay: variables.day.toString(),
-        previousPrice: variables.rawPrice,
-        previousDaySnapshot,
-        optimisticMonth: variables.month,
-        optimisticDay: dayNumber,
-        optimisticCategory: variables.category,
-        optimisticApplied,
-      };
-    },
-    onSuccess: (result, variables) => {
-      if (result.mode === "formula") {
-        const computedValue = variables.formulaResult;
-        const localizedFormula = formatDecimalDotsToCommas(result.formula);
-        const formattedResult =
-          typeof computedValue === "number"
-            ? ` (wynik ${computedValue.toFixed(2)} zł)`
-            : "";
-        toast.success(
-          isSalary
-            ? `Zapisano formułę ${localizedFormula} dla wynagrodzenia ${variables.category}${formattedResult}`
-            : `Dodano formułę ${localizedFormula} do kategorii ${variables.category}${formattedResult}`
-        );
-      } else {
-        const formattedAmount = result.amount.toFixed(2);
-        toast.success(
-          isSalary
-            ? `Zapisano ${formattedAmount} zł dla wynagrodzenia ${variables.category}`
-            : `Dodano ${formattedAmount} zł do kategorii ${variables.category}`
-        );
-      }
-      void getDayAmounts(variables.month, variables.day, {
-        forceRefresh: true,
-        entryType,
-      });
-      setDayCacheVersion((version) => version + 1);
-    },
-    onError: (error: Error, _variables, context) => {
-      // Rollback - przywróć dane w razie błędu
-      if (context) {
-        form.setValue("category", context.previousCategory);
-        form.setValue("day", context.previousDay);
-        form.setValue("price", context.previousPrice);
-      }
-      if (context?.optimisticApplied) {
-        if (context.previousDaySnapshot) {
-          setDayAmountsCache(
-            context.optimisticMonth,
-            context.optimisticDay,
-            context.previousDaySnapshot,
-            entryType
-          );
-        } else {
-          removeDayAmountsCache(
-            context.optimisticMonth,
-            context.optimisticDay,
-            entryType
-          );
-        }
-        setDayCacheVersion((version) => version + 1);
-      }
-      toast.error(
-        error.message ||
-          `Nie udało się dodać ${isSalary ? "wynagrodzenia" : "wydatku"}`
-      );
-    },
-    retry: 3,
-    retryDelay: (attemptIndex) => {
-      toast.loading(`Ponowna próba... (${attemptIndex + 1}/3)`, {
-        id: "retry",
-      });
-      return Math.min(1000 * 2 ** attemptIndex, 30000);
-    },
-  });
-
-  const { mutate: mutateExpense, isPending: isAddExpensePending } =
-    addExpenseMutation;
-
   usePullToRefresh(
     handlePullRefresh,
     !isCategoryPickerOpen &&
       !isDayPickerOpen &&
       !isMonthPickerOpen &&
-      !isAddExpensePending
+      !isEnqueueing
   );
 
   const onSubmit = useCallback(
     async (data: ExpenseFormValues) => {
-      if (isAddExpensePending) {
+      if (isEnqueueing) {
         return;
       }
       const parsed = parsePriceInput(data.price);
@@ -775,26 +520,51 @@ export function ExpenseForm({
         return;
       }
 
-      const normalizedPrice =
-        parsed.mode === "value"
-          ? parsed.amount.toFixed(2)
-          : formatDecimalDotsToCommas(parsed.formula);
-
       const formulaResult =
         parsed.mode === "formula"
           ? evaluateLinearExpression(parsed.formula.slice(1))
           : null;
 
-      mutateExpense({
-        category: data.category,
-        day: parseInt(data.day, 10),
-        price: normalizedPrice,
-        rawPrice: data.price,
-        month: selectedMonth,
-        formulaResult,
-      });
+      setIsEnqueueing(true);
+      try {
+        await enqueueBudgetEntry({
+          entryType,
+          category: data.category,
+          day: parseInt(data.day, 10),
+          month: selectedMonth,
+          desired:
+            parsed.mode === "value"
+              ? { mode: "value", amount: parsed.amount }
+              : {
+                  mode: "formula",
+                  formula: formatDecimalDotsToCommas(parsed.formula),
+                  amount: formulaResult ?? 0,
+                },
+        });
+        form.reset({
+          category: "",
+          day: new Date().getDate().toString(),
+          price: "",
+        });
+        setDayCacheVersion((version) => version + 1);
+        if (navigator.onLine) {
+          toast.success(
+            isSalary
+              ? "Wynagrodzenie przyjęte do zapisu"
+              : "Wydatek przyjęty do zapisu"
+          );
+        } else {
+          toast.info("Zapisano lokalnie — oczekuje na internet");
+        }
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Nie udało się zapisać lokalnie"
+        );
+      } finally {
+        setIsEnqueueing(false);
+      }
     },
-    [form, isAddExpensePending, mutateExpense, selectedMonth]
+    [entryType, form, isEnqueueing, isSalary, selectedMonth]
   );
 
   useEffect(() => {
@@ -911,7 +681,7 @@ export function ExpenseForm({
                 size="icon-sm"
                 className="rounded-full border-border/80 bg-background/80 shadow-sm"
                 onClick={onEntryTypeToggle}
-                disabled={isAddExpensePending}
+                disabled={isEnqueueing}
                 aria-label={
                   isSalary
                     ? "Przejdź do wydatków"
@@ -937,7 +707,7 @@ export function ExpenseForm({
               value={selectedMonth}
               onValueChange={handleMonthChange}
               onOpenChange={setIsMonthPickerOpen}
-              disabled={isAddExpensePending}
+              disabled={isEnqueueing}
             >
               <SelectTrigger
                 aria-label="Zmień miesiąc"
@@ -996,6 +766,64 @@ export function ExpenseForm({
               </div>
             </div>
           )}
+
+          {queueSnapshot.offline && queueSnapshot.pending > 0 && (
+            <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+              Zapisano lokalnie — {queueSnapshot.pending}{" "}
+              {queueSnapshot.pending === 1 ? "wpis oczekuje" : "wpisy oczekują"}{" "}
+              na internet.
+            </div>
+          )}
+
+          {queueSnapshot.problems.map((problem) => (
+            <div
+              key={problem.commandId}
+              className="mb-4 rounded-xl border border-red-300 bg-red-50 p-3 text-sm dark:border-red-900 dark:bg-red-950/50"
+            >
+              <div className="flex items-start gap-2">
+                <TriangleAlert className="mt-0.5 size-4 shrink-0 text-red-600" />
+                <div className="min-w-0 flex-1">
+                  <p className="font-semibold text-red-900 dark:text-red-100">
+                    {problem.state === "conflict"
+                      ? "Wartość w arkuszu została zmieniona"
+                      : "Nie udało się zsynchronizować wpisu"}
+                  </p>
+                  <p className="mt-1 text-red-800 dark:text-red-200">
+                    {problem.category}, {problem.day}. {problem.month}: {problem.lastError}
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {problem.state === "conflict" ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() =>
+                          void overwriteBudgetQueueConflict(problem.commandId)
+                        }
+                      >
+                        Zastąp wartością z kolejki
+                      </Button>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => void retryBudgetQueueRecord(problem.commandId)}
+                      >
+                        Spróbuj ponownie
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void discardBudgetQueueRecord(problem.commandId)}
+                    >
+                      Zachowaj wartość z arkusza
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
 
           {!categories.length ? (
             <div className="flex flex-col items-center justify-center py-12">
@@ -1100,7 +928,7 @@ export function ExpenseForm({
                               <CalculatorRibbon
                                 onInsertSymbol={handleInsertSymbol}
                                 disabled={
-                                  isLoadingAmount || isAddExpensePending
+                                  isLoadingAmount || isEnqueueing
                                 }
                               />
                             )}
@@ -1152,7 +980,7 @@ export function ExpenseForm({
                 <div className="pt-2">
                   <Button
                     type="submit"
-                    disabled={isAddExpensePending}
+                    disabled={isEnqueueing}
                     className="w-full h-12 text-base font-semibold shadow-md hover:shadow-lg transition-all"
                   >
                     <Save className="size-5" aria-hidden="true" />
@@ -1175,7 +1003,7 @@ export function ExpenseForm({
               <div className="pointer-events-auto mx-auto w-full max-w-md">
                 <CalculatorRibbon
                   onInsertSymbol={handleInsertSymbol}
-                  disabled={isLoadingAmount || isAddExpensePending}
+                  disabled={isLoadingAmount || isEnqueueing}
                   className="mb-0 shadow-xl"
                 />
               </div>

@@ -2,6 +2,24 @@
 
 Aplikację możesz wdrożyć na różne platformy hostingowe. Poniżej znajdziesz instrukcje dla najpopularniejszych opcji.
 
+## Kolejność wdrożenia szybkiego zapisu
+
+1. Skopiuj aktualny `google-apps-script/Code.gs` do projektu powiązanego z arkuszem i utwórz **nowe wdrożenie** Web App.
+2. Ustaw nowe `VITE_APPS_SCRIPT_URL` w środowisku podglądowym frontendu.
+3. Sprawdź protokół bez zapisywania danych:
+
+```bash
+VITE_APPS_SCRIPT_URL="https://script.google.com/macros/s/.../exec" \
+SMOKE_EXPENSE_CATEGORY="Zakupy" \
+SMOKE_SALARY_CATEGORY="Pensja" \
+npm run smoke:apps-script
+```
+
+4. Wdróż frontend z `VITE_QUEUE_BATCH_SIZE=1`. Stare akcje `addExpense` i `addSalary` pozostają fallbackiem, gdy POST jest niedostępny.
+5. Po potwierdzeniu poprawnych wykonań, braku konfliktów i błędów `busy` można ustawić `VITE_QUEUE_BATCH_SIZE=10`.
+
+Smoke-test korzysta z `validateOnly`, więc sprawdza oba zakresy i compare-and-set bez modyfikowania komórek.
+
 ## Opcja 1: Vercel (ZALECANE - najłatwiejsze)
 
 ### Automatyczne wdrożenie z GitHub

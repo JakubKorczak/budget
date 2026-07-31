@@ -7,6 +7,7 @@ import { ExpenseForm } from "./components/ExpenseForm";
 import { Login } from "./components/Login";
 import { ThemeToggle } from "./components/ThemeToggle";
 import type { BudgetEntryType } from "./services/googleSheets";
+import { startBudgetQueueSync } from "./services/budgetQueue";
 import {
   applyTheme,
   getPreferredTheme,
@@ -26,10 +27,6 @@ const queryClient = new QueryClient({
       staleTime: 1000 * 60 * 5, // 5 minut
       retry: 3,
     },
-    mutations: {
-      retry: 3,
-      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
-    },
   },
 });
 
@@ -46,6 +43,13 @@ function App() {
   useEffect(() => {
     applyTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      return;
+    }
+    return startBudgetQueueSync();
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (getStoredTheme()) {

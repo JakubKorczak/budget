@@ -39,10 +39,6 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  if (url.hostname.includes("googleapis.com")) {
-    event.respondWith(networkFirst(request));
-    return;
-  }
 });
 
 async function cacheFirst(request, cacheName = STATIC_CACHE) {
