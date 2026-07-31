@@ -25,7 +25,7 @@ function doGet(e) {
     const params = e && e.parameter ? e.parameter : {};
     const action = params.action;
 
-    if (action === "addExpense") {
+    if (action === "addExpense" || action === "addSalary") {
       const category = params.category;
       const day = parseInt(params.day);
       const amount = params.amount ? parseFloat(params.amount) : null;
@@ -33,7 +33,17 @@ function doGet(e) {
       const formula = params.formula;
       const mode = params.mode;
 
-      return handleAddExpense(category, day, amount, month, formula, mode);
+      const entryType = action === "addSalary" ? "salary" : "expense";
+
+      return handleAddExpense(
+        category,
+        day,
+        amount,
+        month,
+        formula,
+        mode,
+        entryType
+      );
     }
 
     // Endpoint testowy
@@ -64,8 +74,17 @@ function doPost(e) {
     const data = JSON.parse(e.postData.contents);
     const { action, category, day, amount, month, formula, mode } = data;
 
-    if (action === "addExpense") {
-      return handleAddExpense(category, day, amount, month, formula, mode);
+    if (action === "addExpense" || action === "addSalary") {
+      const entryType = action === "addSalary" ? "salary" : "expense";
+      return handleAddExpense(
+        category,
+        day,
+        amount,
+        month,
+        formula,
+        mode,
+        entryType
+      );
     }
 
     return ContentService.createTextOutput(
@@ -87,7 +106,7 @@ function doPost(e) {
 /**
  * Główna funkcja dodająca wydatek do arkusza
  */
-function handleAddExpense(category, day, amount, month, formula, mode) {
+function handleAddExpense(category, day, amount, month, formula, mode, entryType) {
   try {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(month);
 
@@ -100,8 +119,10 @@ function handleAddExpense(category, day, amount, month, formula, mode) {
       ).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // Zakres kategorii w arkuszu
-    const categoryRange = sheet.getRange("B79:B257");
+    // Zakres zależy od rodzaju wpisu: wynagrodzenia B58:B70, wydatki B79:B257.
+    const isSalary = entryType === "salary";
+    const firstCategoryRow = isSalary ? 58 : 79;
+    const categoryRange = sheet.getRange(isSalary ? "B58:B70" : "B79:B257");
     const categoryValues = categoryRange.getValues().flat();
 
     // Znajdź wiersz kategorii (trim aby usunąć spacje)
@@ -119,7 +140,7 @@ function handleAddExpense(category, day, amount, month, formula, mode) {
       ).setMimeType(ContentService.MimeType.JSON);
     }
 
-    const categoryRowIndex = categoryIndex + 79;
+    const categoryRowIndex = categoryIndex + firstCategoryRow;
 
     // Oblicz kolumnę na podstawie dnia (kolumna I = dzień 1, indeks 9)
     const dayColumnIndex = 8 + parseInt(day);
@@ -144,7 +165,9 @@ function handleAddExpense(category, day, amount, month, formula, mode) {
         success: true,
         message: hasFormula
           ? "Formuła dodana pomyślnie"
-          : "Wydatek dodany pomyślnie",
+          : isSalary
+            ? "Wynagrodzenie dodane pomyślnie"
+            : "Wydatek dodany pomyślnie",
         data: {
           category: category,
           day: day,

@@ -35,11 +35,11 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "w-full h-12 px-4 py-3 text-base bg-white border-2 border-gray-200 rounded-xl shadow-sm",
-        "text-gray-900 placeholder:text-gray-400",
+        "w-full h-12 px-4 py-3 text-base bg-background border-2 border-input rounded-xl shadow-sm",
+        "text-foreground placeholder:text-muted-foreground",
         "flex items-center justify-between gap-2",
         "focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500",
-        "disabled:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50",
+        "disabled:bg-muted disabled:cursor-not-allowed disabled:opacity-50",
         "transition-all duration-200",
         "touch-manipulation",
         className
@@ -78,7 +78,7 @@ function SelectContent({
           ...style,
         }}
         className={cn(
-          "bg-white text-gray-900 border border-gray-200 rounded-md shadow-lg",
+          "bg-popover text-popover-foreground border border-border rounded-md shadow-lg",
           "relative z-50 max-h-(--radix-select-content-available-height)",
           "w-full max-w-full",
           "origin-(--radix-select-content-transform-origin) overflow-x-hidden overflow-y-auto",
@@ -137,9 +137,9 @@ function SelectItem({
       data-slot="select-item"
       className={cn(
         "relative flex w-full cursor-pointer items-center gap-2 rounded-lg py-3 pr-8 pl-3 text-base",
-        "text-gray-900 outline-none select-none",
-        "focus:bg-blue-50 focus:text-blue-900",
-        "active:bg-blue-100",
+        "text-popover-foreground outline-none select-none",
+        "focus:bg-accent focus:text-accent-foreground",
+        "active:bg-accent/80",
         "data-disabled:pointer-events-none data-disabled:opacity-50",
         "touch-manipulation",
         className

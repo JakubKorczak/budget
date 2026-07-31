@@ -12,6 +12,8 @@ interface CategoryComboboxProps {
   value?: string;
   onChange: (newValue: string) => void;
   placeholder?: string;
+  searchPlaceholder?: string;
+  emptyMessage?: string;
   disabled?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
@@ -47,6 +49,8 @@ export function CategoryCombobox({
   value,
   onChange,
   placeholder = "Wybierz kategorię...",
+  searchPlaceholder = "Szukaj kategorii...",
+  emptyMessage = "Brak kategorii dla tego filtra",
   disabled,
   onOpenChange,
 }: CategoryComboboxProps) {
@@ -126,12 +130,12 @@ export function CategoryCombobox({
           maxWidth: contentWidth ?? undefined,
         }}
       >
-        <div className="p-3 border-b border-gray-100 flex items-center gap-2">
-          <Search className="size-4 text-gray-400" />
+        <div className="p-3 border-b border-border flex items-center gap-2">
+          <Search className="size-4 text-muted-foreground" />
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Szukaj kategorii..."
+            placeholder={searchPlaceholder}
             className="border-0 shadow-none focus-visible:ring-0 h-10 p-0"
           />
         </div>
@@ -139,7 +143,7 @@ export function CategoryCombobox({
           {hasResults ? (
             sections.map((section) => (
               <div key={section.groupName}>
-                <div className="px-3 py-2 text-xs font-bold text-gray-500 bg-gray-50 uppercase tracking-wide">
+                <div className="px-3 py-2 text-xs font-bold text-muted-foreground bg-muted uppercase tracking-wide">
                   {section.groupName}
                 </div>
                 {section.items.map((item) => (
@@ -148,10 +152,10 @@ export function CategoryCombobox({
                     type="button"
                     className={cn(
                       "w-full flex items-center justify-between px-3 py-3 text-left text-base",
-                      "hover:bg-blue-50 focus-visible:outline-none",
+                      "hover:bg-accent focus-visible:outline-none",
                       value === item
-                        ? "text-blue-600 font-semibold"
-                        : "text-gray-900"
+                        ? "text-blue-600 font-semibold dark:text-blue-400"
+                        : "text-popover-foreground"
                     )}
                     onClick={() => {
                       onChange(item);
@@ -167,7 +171,7 @@ export function CategoryCombobox({
             ))
           ) : (
             <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-              Brak kategorii dla tego filtra
+              {emptyMessage}
             </div>
           )}
         </div>

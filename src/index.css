@@ -1,6 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* iOS Safe Area Support */
 :root {
   --sat: env(safe-area-inset-top);
@@ -38,8 +40,8 @@ body {
   font-weight: 400;
 
   color-scheme: light;
-  color: #213547;
-  background-color: #ffffff;
+  color: var(--foreground);
+  background-color: var(--background);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -79,6 +81,36 @@ body {
   --sidebar-ring: oklch(0.708 0 0);
 }
 
+.dark {
+  color-scheme: dark;
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 14%);
+  --input: oklch(1 0 0 / 18%);
+  --ring: oklch(0.556 0 0);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 14%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
 a {
   font-weight: 500;
   color: #646cff;
@@ -94,8 +126,8 @@ body {
   min-width: 320px;
   min-height: 100vh;
   min-height: 100dvh;
-  background-color: #f8fafc;
-  color: #1f2937;
+  background-color: var(--background);
+  color: var(--foreground);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   /* Prevent text size adjustment on orientation change on iOS */
@@ -120,7 +152,7 @@ html {
 h1 {
   font-size: 3.2em;
   line-height: 1.1;
-  color: #1f2937;
+  color: var(--foreground);
 }
 
 button:not([data-slot]) {

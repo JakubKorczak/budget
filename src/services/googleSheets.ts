@@ -23,9 +23,11 @@ export type DayAmountEntry = {
 };
 
 export type DayAmountsMap = Record<string, DayAmountEntry>;
-export type AddExpenseResult =
+export type BudgetEntryType = "expense" | "salary";
+export type AddBudgetEntryResult =
   | { mode: "value"; amount: number }
   | { mode: "formula"; formula: string };
+export type AddExpenseResult = AddBudgetEntryResult;
 
 interface DayAmountsCacheEntry {
   timestamp: number;
@@ -38,6 +40,7 @@ const categoryGridCache = new Map<string, CategoryGridCacheEntry>();
 const categoryRowValuesCache = new Map<string, (string | number | null)[]>();
 
 const CATEGORY_CACHE_KEY = "budget:categories:v2";
+const SALARY_CATEGORIES_CACHE_PREFIX = "budget:salary-categories:v1";
 const CATEGORY_CACHE_TTL = 1000 * 60 * 60 * 24; // 24h
 
 const DAY_AMOUNTS_CACHE_PREFIX = "budget:day-amounts";
@@ -134,19 +137,24 @@ export function clearCategoriesCache(): void {
   }
 }
 
-function buildDayAmountsCacheKey(month: string, day: number): string {
-  return `${DAY_AMOUNTS_CACHE_PREFIX}:${month}:${day}`;
+function buildDayAmountsCacheKey(
+  month: string,
+  day: number,
+  entryType: BudgetEntryType
+): string {
+  return `${DAY_AMOUNTS_CACHE_PREFIX}:${entryType}:${month}:${day}`;
 }
 
 function readDayAmountsCache(
   month: string,
-  day: number
+  day: number,
+  entryType: BudgetEntryType = "expense"
 ): DayAmountsCacheEntry | null {
   if (typeof window === "undefined") {
     return null;
   }
 
-  const key = buildDayAmountsCacheKey(month, day);
+  const key = buildDayAmountsCacheKey(month, day, entryType);
   try {
     const payload = window.localStorage.getItem(key);
     if (!payload) {
@@ -214,13 +222,14 @@ export function clearAllDayAmountCaches(): void {
 function writeDayAmountsCache(
   month: string,
   day: number,
-  data: DayAmountsMap
+  data: DayAmountsMap,
+  entryType: BudgetEntryType = "expense"
 ): void {
   if (typeof window === "undefined") {
     return;
   }
 
-  const key = buildDayAmountsCacheKey(month, day);
+  const key = buildDayAmountsCacheKey(month, day, entryType);
   try {
     const payload: DayAmountsCacheEntry = {
       timestamp: Date.now(),
@@ -238,18 +247,23 @@ function writeDayAmountsCache(
 export function setDayAmountsCache(
   month: string,
   day: number,
-  data: DayAmountsMap
+  data: DayAmountsMap,
+  entryType: BudgetEntryType = "expense"
 ): void {
-  writeDayAmountsCache(month, day, data);
+  writeDayAmountsCache(month, day, data, entryType);
 }
 
-export function removeDayAmountsCache(month: string, day: number): void {
+export function removeDayAmountsCache(
+  month: string,
+  day: number,
+  entryType: BudgetEntryType = "expense"
+): void {
   if (typeof window === "undefined") {
     return;
   }
 
   try {
-    const key = buildDayAmountsCacheKey(month, day);
+    const key = buildDayAmountsCacheKey(month, day, entryType);
     window.localStorage.removeItem(key);
   } catch (error) {
     console.warn("[Sheets] Nie udało się usunąć cache dnia", error);
@@ -258,9 +272,10 @@ export function removeDayAmountsCache(month: string, day: number): void {
 
 export function getCachedDayAmountsSnapshot(
   month: string,
-  day: number
+  day: number,
+  entryType: BudgetEntryType = "expense"
 ): DayAmountsMap | null {
-  return readDayAmountsCache(month, day)?.data ?? null;
+  return readDayAmountsCache(month, day, entryType)?.data ?? null;
 }
 
 function normalizeAmountValue(
@@ -287,9 +302,10 @@ function normalizeAmountValue(
 
 async function fetchDayAmountsFromSheet(
   month: string,
-  day: number
+  day: number,
+  entryType: BudgetEntryType
 ): Promise<DayAmountsMap> {
-  const { rowData, startRow } = await getCategoryGrid(month);
+  const { rowData, startRow } = await getCategoryGrid(month, entryType);
   if (!rowData.length) {
     return {};
   }
@@ -336,21 +352,23 @@ async function fetchDayAmountsFromSheet(
 export async function getDayAmounts(
   month: string,
   day: number,
-  options?: { forceRefresh?: boolean }
+  options?: { forceRefresh?: boolean; entryType?: BudgetEntryType }
 ): Promise<DayAmountsMap> {
   if (!Number.isFinite(day)) {
     return {};
   }
 
+  const entryType = options?.entryType ?? "expense";
+
   if (!options?.forceRefresh) {
-    const cached = readDayAmountsCache(month, day);
+    const cached = readDayAmountsCache(month, day, entryType);
     if (cached) {
       return cached.data;
     }
   }
 
-  const fetched = await fetchDayAmountsFromSheet(month, day);
-  writeDayAmountsCache(month, day, fetched);
+  const fetched = await fetchDayAmountsFromSheet(month, day, entryType);
+  writeDayAmountsCache(month, day, fetched, entryType);
   return fetched;
 }
 
@@ -358,13 +376,14 @@ export function incrementDayAmountCache(
   month: string,
   day: number,
   category: string,
-  delta: number
+  delta: number,
+  entryType: BudgetEntryType = "expense"
 ): void {
   if (!Number.isFinite(delta) || !category) {
     return;
   }
 
-  const existing = readDayAmountsCache(month, day);
+  const existing = readDayAmountsCache(month, day, entryType);
   if (!existing) {
     return;
   }
@@ -377,7 +396,7 @@ export function incrementDayAmountCache(
     amount: updatedValue,
     formula: null,
   };
-  writeDayAmountsCache(month, day, nextData);
+  writeDayAmountsCache(month, day, nextData, entryType);
 }
 
 /**
@@ -451,13 +470,149 @@ export async function getCategories(): Promise<Category[]> {
   }
 }
 
-async function getCategoryGrid(month: string): Promise<CategoryGridCacheEntry> {
-  const cached = categoryGridCache.get(month);
+function buildSalaryCategoriesCacheKey(month: string): string {
+  return `${SALARY_CATEGORIES_CACHE_PREFIX}:${month}`;
+}
+
+function readSalaryCategoriesCache(month: string): Category[] | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  const key = buildSalaryCategoriesCacheKey(month);
+  try {
+    const payload = window.localStorage.getItem(key);
+    if (!payload) {
+      return null;
+    }
+
+    const parsed = JSON.parse(payload) as {
+      timestamp?: number;
+      data?: Category[];
+    } | null;
+
+    if (
+      !parsed ||
+      typeof parsed.timestamp !== "number" ||
+      !isValidCategoryCache(parsed.data) ||
+      Date.now() - parsed.timestamp > CATEGORY_CACHE_TTL
+    ) {
+      window.localStorage.removeItem(key);
+      return null;
+    }
+
+    return parsed.data ?? null;
+  } catch (error) {
+    console.warn(
+      "[Sheets] Nie udało się odczytać cache wynagrodzeń",
+      error
+    );
+    return null;
+  }
+}
+
+function writeSalaryCategoriesCache(month: string, data: Category[]): void {
+  if (typeof window === "undefined" || !isValidCategoryCache(data)) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      buildSalaryCategoriesCacheKey(month),
+      JSON.stringify({ timestamp: Date.now(), data })
+    );
+  } catch (error) {
+    console.warn(
+      "[Sheets] Nie udało się zapisać cache wynagrodzeń",
+      error
+    );
+  }
+}
+
+export function getCachedSalaryCategoriesSnapshot(
+  month: string
+): Category[] | null {
+  return readSalaryCategoriesCache(month);
+}
+
+export function clearSalaryCategoriesCache(month?: string): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    if (month) {
+      window.localStorage.removeItem(buildSalaryCategoriesCacheKey(month));
+      return;
+    }
+
+    const keysToRemove: string[] = [];
+    for (let index = 0; index < window.localStorage.length; index++) {
+      const key = window.localStorage.key(index);
+      if (key?.startsWith(SALARY_CATEGORIES_CACHE_PREFIX)) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach((key) => window.localStorage.removeItem(key));
+  } catch (error) {
+    console.warn(
+      "[Sheets] Nie udało się wyczyścić cache wynagrodzeń",
+      error
+    );
+  }
+}
+
+export async function getSalaryCategories(month: string): Promise<Category[]> {
+  const cached = readSalaryCategoriesCache(month);
   if (cached) {
     return cached;
   }
 
-  const categoriesRange = `${month}!B79:B257`;
+  try {
+    const range = `${month}!B58:B70`;
+    const url = `${BASE_URL}/${SPREADSHEET_ID}/values/${range}?key=${API_KEY}`;
+    const response = await axios.get(url);
+    const values: string[][] = response.data.values || [];
+    const salaries = values
+      .map((row) => row[0]?.trim())
+      .filter((value): value is string => Boolean(value && value !== "."));
+
+    if (!salaries.length) {
+      throw new Error("Nie znaleziono wynagrodzeń w wierszach 58–70");
+    }
+
+    const result: Category[] = [{ Wynagrodzenia: salaries }];
+    writeSalaryCategoriesCache(month, result);
+    return result;
+  } catch (error) {
+    console.error("Error fetching salary categories:", error);
+
+    if (axios.isAxiosError(error) && error.response?.status === 429) {
+      throw new Error(
+        "Przekroczono limit zapytań do Google Sheets API. Odczekaj chwilę i odśwież stronę."
+      );
+    }
+
+    if (error instanceof Error && error.message.includes("wierszach 58–70")) {
+      throw error;
+    }
+
+    throw new Error("Nie udało się pobrać listy wynagrodzeń");
+  }
+}
+
+async function getCategoryGrid(
+  month: string,
+  entryType: BudgetEntryType = "expense"
+): Promise<CategoryGridCacheEntry> {
+  const cacheKey = `${entryType}:${month}`;
+  const cached = categoryGridCache.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
+
+  const categoriesRange =
+    entryType === "salary" ? `${month}!B58:B70` : `${month}!B79:B257`;
   const encodedRange = encodeURIComponent(categoriesRange);
   const gridUrl = `${BASE_URL}/${SPREADSHEET_ID}?ranges=${encodedRange}&includeGridData=true&fields=sheets(properties(title),data(rowData(values(formattedValue))))&key=${API_KEY}`;
 
@@ -474,7 +629,10 @@ async function getCategoryGrid(month: string): Promise<CategoryGridCacheEntry> {
   }
 
   const startRowMatch = categoriesRange.match(/![A-Z]+(\d+)/i);
-  const startRow = startRowMatch ? parseInt(startRowMatch[1], 10) : 79;
+  const defaultStartRow = entryType === "salary" ? 58 : 79;
+  const startRow = startRowMatch
+    ? parseInt(startRowMatch[1], 10)
+    : defaultStartRow;
 
   const snapshot = rowData.map((row, idx) => ({
     row: startRow + idx,
@@ -488,7 +646,7 @@ async function getCategoryGrid(month: string): Promise<CategoryGridCacheEntry> {
     rowData,
     snapshot,
   };
-  categoryGridCache.set(month, entry);
+  categoryGridCache.set(cacheKey, entry);
   return entry;
 }
 
@@ -521,7 +679,11 @@ async function getCategoryRowValues(
 }
 
 function invalidateMonthCache(month: string) {
-  categoryGridCache.delete(month);
+  for (const key of categoryGridCache.keys()) {
+    if (key.endsWith(`:${month}`)) {
+      categoryGridCache.delete(key);
+    }
+  }
   for (const key of categoryRowValuesCache.keys()) {
     if (key.startsWith(`${month}:`)) {
       categoryRowValuesCache.delete(key);
@@ -619,12 +781,13 @@ function safeEval(expression: string): number {
  * Do zapisu potrzebny jest OAuth 2.0. Ta funkcja jest przygotowana,
  * ale wymaga implementacji backendu z OAuth lub użycia Google Apps Script.
  */
-export async function addExpense(
+export async function addBudgetEntry(
   category: string,
   day: number,
   price: string,
-  month: string
-): Promise<AddExpenseResult> {
+  month: string,
+  entryType: BudgetEntryType = "expense"
+): Promise<AddBudgetEntryResult> {
   try {
     const trimmedPrice = price.trim();
     const isFormula = trimmedPrice.startsWith("=");
@@ -640,7 +803,7 @@ export async function addExpense(
       console.warn("Apps Script URL nie jest skonfigurowany");
       throw new Error(
         "Brak konfiguracji Apps Script URL.\n\n" +
-          "Aby zapisywać wydatki, musisz skonfigurować Google Apps Script:\n" +
+          "Aby zapisywać dane, musisz skonfigurować Google Apps Script:\n" +
           "1. Zobacz instrukcje w QUICK-START.md (Krok 3)\n" +
           "2. Dodaj VITE_APPS_SCRIPT_URL do pliku .env"
       );
@@ -648,7 +811,7 @@ export async function addExpense(
 
     // Używamy GET aby uniknąć problemów z CORS
     const params = new URLSearchParams({
-      action: "addExpense",
+      action: entryType === "salary" ? "addSalary" : "addExpense",
       category,
       day: day.toString(),
       month,
@@ -674,7 +837,16 @@ export async function addExpense(
     // Sprawdź czy operacja się powiodła
     if (response.data.success === false || response.data.error) {
       throw new Error(
-        response.data.error || "Nieznany błąd podczas dodawania wydatku"
+        response.data.error ||
+          `Nieznany błąd podczas dodawania ${
+            entryType === "salary" ? "wynagrodzenia" : "wydatku"
+          }`
+      );
+    }
+
+    if (entryType === "salary" && response.data.success !== true) {
+      throw new Error(
+        "Google Apps Script nie obsługuje jeszcze wynagrodzeń. Zaktualizuj kod Code.gs i utwórz nowe wdrożenie."
       );
     }
 
@@ -687,12 +859,25 @@ export async function addExpense(
       ? { mode: "formula", formula: trimmedPrice }
       : { mode: "value", amount: roundedAmount ?? 0 };
   } catch (error) {
-    console.error("Error adding expense:", error);
+    console.error(`Error adding ${entryType}:`, error);
     if (error instanceof Error) {
       throw error; // Przekaż oryginalny błąd z opisem
     }
-    throw new Error("Nie udało się dodać wydatku");
+    throw new Error(
+      `Nie udało się dodać ${
+        entryType === "salary" ? "wynagrodzenia" : "wydatku"
+      }`
+    );
   }
+}
+
+export function addExpense(
+  category: string,
+  day: number,
+  price: string,
+  month: string
+): Promise<AddExpenseResult> {
+  return addBudgetEntry(category, day, price, month, "expense");
 }
 
 /**
