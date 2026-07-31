@@ -112,15 +112,9 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Toaster position="bottom-center" richColors theme={theme} />
-      <div className="h-full overflow-y-auto bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50 text-foreground transition-colors dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950">
-        <div
-          className="container mx-auto px-3 sm:px-4 max-w-md"
-          style={{
-            paddingTop: "8px",
-            paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))",
-          }}
-        >
-          <main>
+      <div className="budget-app-shell h-full overflow-y-auto bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50 text-foreground transition-colors dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950">
+        <div className="budget-app-viewport mx-auto w-full max-w-[440px]">
+          <main className="w-full">
             <ExpenseForm
               key={entryType}
               entryType={entryType}

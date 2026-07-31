@@ -29,7 +29,7 @@ export function Login({ onLogin }: LoginProps) {
   };
 
   return (
-    <div className="min-h-screen bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center p-4 text-foreground transition-colors dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950">
+    <div className="login-screen min-h-full bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50 flex items-center justify-center text-foreground transition-colors dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950">
       <Card className="w-full max-w-md shadow-xl">
         <CardHeader className="text-center">
           <CardTitle className="mb-2 flex items-center justify-center gap-3 text-3xl font-bold bg-linear-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent dark:from-blue-400 dark:to-purple-400">
