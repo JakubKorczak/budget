@@ -68,6 +68,28 @@ describe("persistent budget outbox", () => {
     });
   });
 
+  it("preserves the value shown to the user when a newer snapshot arrives", async () => {
+    await patchBudgetDayCell("expense", "Lipiec", 31, "Zakupy", {
+      mode: "value",
+      amount: 140,
+    });
+
+    await enqueueBudgetEntry({
+      entryType: "expense",
+      month: "Lipiec",
+      day: 31,
+      category: "Zakupy",
+      expected: { mode: "value", amount: 100 },
+      desired: { mode: "value", amount: 120 },
+    });
+
+    const database = await getBudgetDatabase();
+    const records = await database.getAll("queue");
+    expect(records).toHaveLength(1);
+    expect(records[0]?.expected).toEqual({ mode: "value", amount: 100 });
+    expect(records[0]?.desired).toEqual({ mode: "value", amount: 120 });
+  });
+
   it("restores the server value when a conflicted record is discarded", async () => {
     const database = await getBudgetDatabase();
     await patchBudgetDayCell("salary", "Lipiec", 10, "Pensja", {

@@ -86,7 +86,8 @@
 
 - Zapis wydatków i wynagrodzeń trafia najpierw do trwałego outboxu IndexedDB, więc formularz nie czeka na Apps Script i działa offline.
 - Operacje ustawiają końcową wartość komórki. Niewysłane operacje tej samej komórki są scalane, a wartość bazowa służy do wykrywania konfliktu.
-- Dane dnia są pobierane jednym `spreadsheets.get` dla zakresów wynagrodzeń i wydatków oraz przechowywane w maksymalnie 62 snapshotach przez 6 godzin.
+- Dane dnia są pobierane jednym `spreadsheets.get` dla zakresów wynagrodzeń i wydatków. Snapshoty są przechowywane przez 6 godzin jako awaryjny odczyt offline, ale przy aktywnej aplikacji wybrana kwota jest odświeżana z arkusza co 10 sekund oraz po powrocie do okna.
+- Odświeżenie w tle nie zmienia pola, które użytkownik zaczął już edytować. Zapis zachowuje wartość bazową widoczną przed edycją, więc równoległa zmiana drugiej osoby jest wykrywana zamiast cichego nadpisania.
 - Po udanym zapisie nie jest wykonywany odczyt weryfikacyjny ani invalidacja mapy kategorii.
 - Apps Script v2 obsługuje `applyBudgetEntries`, `validateOnly`, blokadę skryptu, cache map kategorii i odpowiedzi `applied`, `alreadyApplied`, `conflict`, `invalid`, `retryable`.
 - Domyślny batch produkcyjny wynosi 1. Po obserwacji wdrożenia można ustawić `VITE_QUEUE_BATCH_SIZE=10`.

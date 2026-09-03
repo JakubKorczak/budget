@@ -69,10 +69,27 @@ import {
   subscribeBudgetQueue,
   type BudgetQueueSnapshot,
 } from "@/services/budgetQueue";
+import {
+  dayAmountToCanonical,
+  type CanonicalCellValue,
+} from "@/services/budgetDb";
 import { MONTHS, type Category } from "@/types/expense";
 import { CategoryCombobox } from "@/components/CategoryCombobox";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import type { AppTheme } from "@/lib/theme";
+import {
+  clearBudgetEntryDraft,
+  readBudgetEntryDraft,
+  writeBudgetEntryDraft,
+} from "@/lib/expenseDraft";
+
+const configuredLiveSyncInterval = Number(
+  import.meta.env.VITE_DAY_SYNC_INTERVAL_MS ?? 10_000
+);
+const LIVE_SYNC_INTERVAL_MS =
+  Number.isFinite(configuredLiveSyncInterval) && configuredLiveSyncInterval > 0
+    ? configuredLiveSyncInterval
+    : 10_000;
 
 function usePreventPullToRefresh(isActive: boolean) {
   useEffect(() => {
@@ -232,6 +249,7 @@ export function ExpenseForm({
   theme,
   onThemeToggle,
 }: ExpenseFormProps) {
+  const [initialDraft] = useState(() => readBudgetEntryDraft(entryType));
   const [isLoadingAmount, setIsLoadingAmount] = useState(false);
   const [isCategoryPickerOpen, setIsCategoryPickerOpen] = useState(false);
   const [isDayPickerOpen, setIsDayPickerOpen] = useState(false);
@@ -248,9 +266,19 @@ export function ExpenseForm({
     problems: [],
     offline: typeof navigator !== "undefined" && !navigator.onLine,
   });
-  const [selectedMonth, setSelectedMonth] = useState(() => getCurrentMonth());
+  const [selectedMonth, setSelectedMonth] = useState(
+    () => initialDraft?.month ?? getCurrentMonth()
+  );
   const queryClient = useQueryClient();
   const isSalary = entryType === "salary";
+  const restoredSelectionRef = useRef(
+    initialDraft
+      ? `${initialDraft.month}\u0000${initialDraft.day}\u0000${initialDraft.category}`
+      : null
+  );
+  const hydratedSelectionRef = useRef<string | null>(null);
+  const loadedCellBaseRef = useRef<CanonicalCellValue | null>(null);
+  const userEditedPriceRef = useRef(Boolean(initialDraft?.price));
 
   useEffect(
     () =>
@@ -301,18 +329,90 @@ export function ExpenseForm({
     reValidateMode: "onSubmit",
     shouldUnregister: true,
     defaultValues: {
-      category: "",
-      day: new Date().getDate().toString(),
-      price: "",
+      category: initialDraft?.category ?? "",
+      day: initialDraft?.day ?? new Date().getDate().toString(),
+      price: initialDraft?.price ?? "",
     },
   });
 
   const priceInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [selectedCategory, selectedDay] = useWatch({
+  const [selectedCategory, selectedDay, enteredPrice] = useWatch({
     control: form.control,
-    name: ["category", "day"],
+    name: ["category", "day", "price"],
   });
+
+  const persistCurrentDraft = useCallback(() => {
+    const values = form.getValues();
+    const isEmptyCurrentDraft =
+      !values.category &&
+      !values.price &&
+      values.day === new Date().getDate().toString() &&
+      selectedMonth === getCurrentMonth();
+
+    if (isEmptyCurrentDraft) {
+      clearBudgetEntryDraft(entryType);
+      return;
+    }
+
+    writeBudgetEntryDraft(entryType, {
+      category: values.category,
+      day: values.day,
+      price: values.price,
+      month: selectedMonth,
+    });
+  }, [entryType, form, selectedMonth]);
+
+  useEffect(() => {
+    persistCurrentDraft();
+  }, [enteredPrice, persistCurrentDraft, selectedCategory, selectedDay]);
+
+  useEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        persistCurrentDraft();
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", persistCurrentDraft);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", persistCurrentDraft);
+    };
+  }, [persistCurrentDraft]);
+
+  useEffect(() => {
+    if (!selectedCategory || !selectedDay || typeof window === "undefined") {
+      return;
+    }
+
+    const requestLiveRefresh = () => {
+      if (
+        document.visibilityState === "visible" &&
+        (typeof navigator === "undefined" || navigator.onLine)
+      ) {
+        setDayCacheVersion((version) => version + 1);
+      }
+    };
+
+    const intervalId = window.setInterval(
+      requestLiveRefresh,
+      LIVE_SYNC_INTERVAL_MS
+    );
+    window.addEventListener("focus", requestLiveRefresh);
+    document.addEventListener("visibilitychange", requestLiveRefresh);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", requestLiveRefresh);
+      document.removeEventListener("visibilitychange", requestLiveRefresh);
+    };
+  }, [selectedCategory, selectedDay, selectedMonth]);
 
   useEffect(() => {
     if (typeof navigator === "undefined") {
@@ -382,6 +482,7 @@ export function ExpenseForm({
         shouldDirty: true,
         shouldValidate: true,
       });
+      userEditedPriceRef.current = true;
 
       requestAnimationFrame(() => {
         const input = priceInputRef.current;
@@ -455,6 +556,8 @@ export function ExpenseForm({
 
             if (selectedCategory) {
               const entry = amounts[selectedCategory];
+              loadedCellBaseRef.current = dayAmountToCanonical(entry);
+              userEditedPriceRef.current = false;
               if (entry?.formula) {
                 form.setValue(
                   "price",
@@ -532,6 +635,7 @@ export function ExpenseForm({
           category: data.category,
           day: parseInt(data.day, 10),
           month: selectedMonth,
+          expected: loadedCellBaseRef.current ?? undefined,
           desired:
             parsed.mode === "value"
               ? { mode: "value", amount: parsed.amount }
@@ -546,6 +650,11 @@ export function ExpenseForm({
           day: new Date().getDate().toString(),
           price: "",
         });
+        clearBudgetEntryDraft(entryType);
+        restoredSelectionRef.current = null;
+        hydratedSelectionRef.current = null;
+        loadedCellBaseRef.current = null;
+        userEditedPriceRef.current = false;
         setDayCacheVersion((version) => version + 1);
         if (navigator.onLine) {
           toast.success(
@@ -571,7 +680,19 @@ export function ExpenseForm({
     let isActive = true;
 
     const hydrateAmount = async () => {
-      if (!selectedDay) {
+      const selectionKey = `${selectedMonth}\u0000${selectedDay ?? ""}\u0000${selectedCategory ?? ""}`;
+      if (restoredSelectionRef.current === selectionKey) {
+        return;
+      }
+      restoredSelectionRef.current = null;
+
+      if (hydratedSelectionRef.current !== selectionKey) {
+        hydratedSelectionRef.current = selectionKey;
+        loadedCellBaseRef.current = null;
+        userEditedPriceRef.current = false;
+      }
+
+      if (!selectedDay || !selectedCategory) {
         if (isActive) {
           setIsLoadingAmount(false);
         }
@@ -593,10 +714,11 @@ export function ExpenseForm({
       );
 
       const applyAmount = (amounts: DayAmountsMap | null) => {
-        if (!amounts || !selectedCategory) {
+        if (!amounts || userEditedPriceRef.current) {
           return;
         }
         const entry = amounts[selectedCategory];
+        loadedCellBaseRef.current = dayAmountToCanonical(entry);
         if (!entry) {
           form.setValue("price", "");
           return;
@@ -625,6 +747,8 @@ export function ExpenseForm({
       try {
         const dayAmounts = await getDayAmounts(selectedMonth, dayNumber, {
           entryType,
+          forceRefresh:
+            typeof navigator === "undefined" ? false : navigator.onLine,
         });
         if (!isActive) {
           return;
@@ -950,6 +1074,7 @@ export function ExpenseForm({
                                   const sanitized = sanitizePriceInput(
                                     e.target.value
                                   );
+                                  userEditedPriceRef.current = true;
                                   fieldProps.onChange(sanitized);
                                 }}
                                 onFocus={() => {

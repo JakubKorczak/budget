@@ -17,6 +17,7 @@ export default defineConfig({
       VITE_GOOGLE_SPREADSHEET_ID: "test-spreadsheet",
       VITE_GOOGLE_API_KEY: "test-api-key",
       VITE_APPS_SCRIPT_URL: "http://127.0.0.1:4173/test-apps-script",
+      VITE_DAY_SYNC_INTERVAL_MS: "250",
     },
   },
 });

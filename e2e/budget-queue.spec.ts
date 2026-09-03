@@ -67,6 +67,67 @@ test("formularz jest gotowy na kolejny wydatek przed odpowiedzią Apps Script", 
   releaseResponse?.();
 });
 
+test("niezatwierdzony wydatek pozostaje w formularzu po odtworzeniu aplikacji", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await selectEntry(page, "Wybierz kategorię...", "Zakupy");
+  await page.getByPlaceholder("0.00").fill("100+20");
+
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.localStorage.getItem("budget:entry-draft:v1:expense")
+      )
+    )
+    .toContain('"price":"100+20"');
+
+  await page.reload();
+
+  await expect(page.getByRole("button", { name: "Zakupy" })).toBeVisible();
+  await expect(page.getByPlaceholder("0.00")).toHaveValue("100+20");
+});
+
+test("wybrana kwota odświeża się po zmianie wykonanej przez drugą osobę", async ({
+  context,
+  page,
+}) => {
+  let remoteAmount = 100;
+  await mockChangingDayAmount(context, () => remoteAmount);
+
+  await page.goto("/");
+  await selectEntry(page, "Wybierz kategorię...", "Zakupy");
+  await expect(page.getByPlaceholder("0.00")).toHaveValue("100");
+
+  remoteAmount = 140;
+
+  await expect(page.getByPlaceholder("0.00")).toHaveValue("140", {
+    timeout: 3_000,
+  });
+});
+
+test("odświeżenie w tle nie nadpisuje rozpoczętej edycji", async ({
+  context,
+  page,
+}) => {
+  let remoteAmount = 100;
+  let snapshotReads = 0;
+  await mockChangingDayAmount(context, () => {
+    snapshotReads += 1;
+    return remoteAmount;
+  });
+
+  await page.goto("/");
+  await selectEntry(page, "Wybierz kategorię...", "Zakupy");
+  await expect(page.getByPlaceholder("0.00")).toHaveValue("100");
+  await page.getByPlaceholder("0.00").fill("100+20");
+
+  remoteAmount = 140;
+  await expect.poll(() => snapshotReads, { timeout: 3_000 }).toBeGreaterThan(1);
+
+  await expect(page.getByPlaceholder("0.00")).toHaveValue("100+20");
+});
+
 test("wpis offline przeżywa zamknięcie strony i synchronizuje się po powrocie", async ({
   context,
   page,
@@ -191,8 +252,51 @@ async function mockSheets(context: BrowserContext) {
   });
 }
 
-function buildGrid(startRow: number, label: string, valueOffset: number) {
+async function mockChangingDayAmount(
+  context: BrowserContext,
+  getAmount: () => number
+) {
+  await context.route("https://sheets.googleapis.com/**", async (route: Route) => {
+    const url = decodeURIComponent(route.request().url());
+    if (url.includes("/values/")) {
+      await route.fallback();
+      return;
+    }
+
+    const today = new Date();
+    const month = MONTHS[today.getMonth()];
+    const valueOffset = today.getDate() + 6;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        sheets: [
+          {
+            properties: { title: month },
+            data: [
+              buildGrid(57, "Pensja", valueOffset),
+              buildGrid(78, "Zakupy", valueOffset, getAmount()),
+            ],
+          },
+        ],
+      }),
+    });
+  });
+}
+
+function buildGrid(
+  startRow: number,
+  label: string,
+  valueOffset: number,
+  amount?: number
+) {
   const values = Array.from({ length: valueOffset + 1 }, () => ({}));
   values[0] = { formattedValue: label };
+  if (amount !== undefined) {
+    values[valueOffset] = {
+      formattedValue: amount.toString(),
+      userEnteredValue: { numberValue: amount },
+      effectiveValue: { numberValue: amount },
+    };
+  }
   return { startRow, rowData: [{ values }] };
 }

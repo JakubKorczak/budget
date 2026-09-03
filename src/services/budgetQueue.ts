@@ -22,6 +22,7 @@ export interface EnqueueBudgetEntryInput {
   month: string;
   day: number;
   category: string;
+  expected?: CanonicalCellValue;
   desired: Exclude<CanonicalCellValue, { mode: "empty" }>;
 }
 
@@ -61,7 +62,10 @@ export async function enqueueBudgetEntry(
 
   const snapshot = await getBudgetDaySnapshot(input.month, input.day, true);
   const currentEntry = snapshot?.[input.entryType]?.[input.category];
-  const expected = mergeTarget?.expected ?? dayAmountToCanonical(currentEntry);
+  const expected =
+    mergeTarget?.expected ??
+    input.expected ??
+    dayAmountToCanonical(currentEntry);
   const record: BudgetQueueRecord = mergeTarget
     ? {
         ...mergeTarget,
