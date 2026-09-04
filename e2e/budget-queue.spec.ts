@@ -74,6 +74,27 @@ test("dolna nawigacja wypełnia szerokość i przylega do dołu ekranu", async (
       )
     ).toBe(34);
     await expect(navigation).toHaveCSS("background-color", "rgb(0, 0, 0)");
+
+    const outerCanvas = await page.evaluate(() => ({
+      htmlColor: getComputedStyle(document.documentElement).backgroundColor,
+      htmlImage: getComputedStyle(document.documentElement).backgroundImage,
+      bodyColor: getComputedStyle(document.body).backgroundColor,
+      bodyImage: getComputedStyle(document.body).backgroundImage,
+      rootImage: getComputedStyle(document.getElementById("root")!).backgroundImage,
+    }));
+    expect(outerCanvas).toMatchObject({
+      htmlColor: "rgb(0, 0, 0)",
+      htmlImage: "none",
+      bodyColor: "rgb(0, 0, 0)",
+      bodyImage: "none",
+    });
+    expect(outerCanvas.rootImage).not.toBe("none");
+
+    const manifest = await page.evaluate(async () => {
+      const response = await fetch("/manifest.json");
+      return (await response.json()) as { background_color: string };
+    });
+    expect(manifest.background_color).toBe("#000000");
   }
 });
 

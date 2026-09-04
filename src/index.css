@@ -39,10 +39,8 @@ body {
   position: fixed;
   width: 100%;
   overscroll-behavior: none;
-  background-color: var(--app-screen-fallback);
-  background-image: var(--app-screen-background);
-  background-repeat: no-repeat;
-  background-size: cover;
+  background-color: #000;
+  background-image: none;
 }
 
 #root {
@@ -127,7 +125,7 @@ body {
 
   color-scheme: light;
   color: var(--foreground);
-  background-color: var(--background);
+  background-color: #000;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
