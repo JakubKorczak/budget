@@ -22,7 +22,7 @@ test.beforeEach(async ({ context }) => {
   await mockSheets(context);
 });
 
-test("dolna nawigacja wypełnia szerokość i ignoruje dolny safe area", async ({
+test("dolna nawigacja pozostaje w całości widoczna nad dolnym obszarem iPhone", async ({
   page,
 }) => {
   for (const viewport of [
@@ -53,7 +53,7 @@ test("dolna nawigacja wypełnia szerokość i ignoruje dolny safe area", async (
     expect(box?.x).toBe(0);
     expect(box?.width).toBe(viewport.width);
     expect(Math.round((box?.y ?? 0) + (box?.height ?? 0))).toBe(
-      viewport.height + 34
+      viewport.height
     );
     expect(Math.round((buttonBox?.y ?? 0) - (actionsBox?.y ?? 0))).toBe(6);
     expect(
@@ -65,6 +65,9 @@ test("dolna nawigacja wypełnia szerokość i ignoruje dolny safe area", async (
       )
     ).toBe(6);
     expect(buttonBox?.x).toBe(viewport.width < 420 ? 12 : 16);
+    expect(Math.round((buttonBox?.y ?? 0) + (buttonBox?.height ?? 0))).toBe(
+      viewport.height - 6
+    );
     expect(
       Math.round(
         (box?.y ?? 0) +
