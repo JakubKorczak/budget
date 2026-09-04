@@ -7,6 +7,7 @@ import {
   formatDecimalDotsToCommas,
   parsePriceInput,
 } from "@/lib/budgetExpression";
+import { getCategoryBudgetProgress } from "@/lib/categoryBudget";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -56,6 +57,7 @@ import {
   getCachedSalaryCategoriesSnapshot,
   getDayAmounts,
   getCachedDayAmountsSnapshot,
+  getCategoryBudgetStatus,
   clearCategoriesCache,
   clearSalaryCategoriesCache,
   clearAllDayAmountCaches,
@@ -82,6 +84,18 @@ import {
   readBudgetEntryDraft,
   writeBudgetEntryDraft,
 } from "@/lib/expenseDraft";
+
+const currencyFormatter = new Intl.NumberFormat("pl-PL", {
+  style: "currency",
+  currency: "PLN",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 2,
+});
+
+const percentageFormatter = new Intl.NumberFormat("pl-PL", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1,
+});
 
 const configuredLiveSyncInterval = Number(
   import.meta.env.VITE_DAY_SYNC_INTERVAL_MS ?? 10_000
@@ -342,6 +356,33 @@ export function ExpenseForm({
     name: ["category", "day", "price"],
   });
 
+  const {
+    data: categoryBudgetAmounts,
+    error: categoryBudgetError,
+    isFetching: isCategoryBudgetLoading,
+  } = useQuery({
+    queryKey: [
+      "category-budget-status",
+      selectedMonth,
+      selectedCategory,
+    ],
+    queryFn: ({ signal }) =>
+      getCategoryBudgetStatus(selectedCategory ?? "", selectedMonth, signal),
+    enabled: !isSalary && Boolean(selectedCategory),
+    retry: 1,
+    refetchOnWindowFocus: false,
+    refetchInterval: LIVE_SYNC_INTERVAL_MS,
+    refetchIntervalInBackground: false,
+  });
+
+  const categoryBudgetProgress = useMemo(
+    () =>
+      categoryBudgetAmounts
+        ? getCategoryBudgetProgress(categoryBudgetAmounts)
+        : null,
+    [categoryBudgetAmounts]
+  );
+
   const persistCurrentDraft = useCallback(() => {
     const values = form.getValues();
     const isEmptyCurrentDraft =
@@ -577,6 +618,13 @@ export function ExpenseForm({
           queryKey: isSalary
             ? ["salary-categories", selectedMonth]
             : ["categories"],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: [
+            "category-budget-status",
+            selectedMonth,
+            selectedCategory,
+          ],
         }),
         refreshDayAmounts,
       ]);
@@ -998,6 +1046,107 @@ export function ExpenseForm({
                     </FormItem>
                   )}
                 />
+
+                {!isSalary && selectedCategory && (
+                  <div
+                    className="rounded-xl border border-border/80 bg-muted/45 p-3"
+                    role="region"
+                    aria-label="Realizacja planu kategorii"
+                    aria-live="polite"
+                  >
+                    {isCategoryBudgetLoading && !categoryBudgetProgress ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 className="size-4 animate-spin" />
+                        Pobieranie realizacji planu...
+                      </div>
+                    ) : categoryBudgetProgress ? (
+                      <>
+                        <div className="flex items-start justify-between gap-3">
+                          <p className="text-sm font-semibold text-foreground">
+                            Realizacja planu kategorii
+                          </p>
+                          <p className="shrink-0 text-sm font-semibold tabular-nums">
+                            {categoryBudgetProgress.percentage === null
+                              ? "Brak planu"
+                              : `${percentageFormatter.format(categoryBudgetProgress.percentage)}%`}
+                          </p>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <p className="text-xs text-muted-foreground">Plan</p>
+                            <p className="font-medium tabular-nums">
+                              {currencyFormatter.format(
+                                categoryBudgetProgress.planned
+                              )}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground">
+                              Wydano
+                            </p>
+                            <p className="font-medium tabular-nums">
+                              {currencyFormatter.format(
+                                categoryBudgetProgress.actual
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                        {categoryBudgetProgress.percentage !== null && (
+                          <div
+                            className="mt-3 h-2 overflow-hidden rounded-full bg-background"
+                            aria-hidden="true"
+                          >
+                            <div
+                              className={cn(
+                                "h-full rounded-full transition-[width]",
+                                categoryBudgetProgress.state === "over"
+                                  ? "bg-red-500"
+                                  : categoryBudgetProgress.state === "met"
+                                    ? "bg-emerald-500"
+                                    : "bg-blue-500"
+                              )}
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  Math.max(
+                                    0,
+                                    categoryBudgetProgress.percentage
+                                  )
+                                )}%`,
+                              }}
+                            />
+                          </div>
+                        )}
+                        <p
+                          className={cn(
+                            "mt-2 text-sm font-medium",
+                            categoryBudgetProgress.state === "over"
+                              ? "text-red-700 dark:text-red-300"
+                              : categoryBudgetProgress.state === "under"
+                                ? "text-emerald-700 dark:text-emerald-300"
+                                : "text-foreground"
+                          )}
+                        >
+                          {categoryBudgetProgress.state === "over"
+                            ? `Przekroczono o ${currencyFormatter.format(
+                                Math.abs(categoryBudgetProgress.difference)
+                              )}`
+                            : categoryBudgetProgress.state === "under"
+                              ? `Pozostało ${currencyFormatter.format(
+                                  categoryBudgetProgress.difference
+                                )}`
+                              : categoryBudgetProgress.state === "met"
+                                ? "Plan wykorzystany w całości"
+                                : "Nie zaplanowano wydatków w tej kategorii"}
+                        </p>
+                      </>
+                    ) : categoryBudgetError ? (
+                      <p className="text-sm text-red-700 dark:text-red-300">
+                        Nie udało się pobrać realizacji planu.
+                      </p>
+                    ) : null}
+                  </div>
+                )}
 
                 <FormField
                   control={form.control}

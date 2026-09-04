@@ -1,4 +1,5 @@
 import axios from "axios";
+import type { CategoryBudgetAmounts } from "@/lib/categoryBudget";
 import type { Category } from "@/types/expense";
 import { MONTHS } from "@/types/expense";
 import {
@@ -821,6 +822,50 @@ export async function getAmount(
     return normalizeAmountValue(amount);
   } catch (error) {
     console.error("Error fetching amount:", error);
+    throw error;
+  }
+}
+
+/**
+ * Pobiera plan, wykonanie i różnicę dla kategorii z kolumn C, D i E.
+ */
+export async function getCategoryBudgetStatus(
+  category: string,
+  month: string,
+  signal?: AbortSignal
+): Promise<CategoryBudgetAmounts> {
+  try {
+    const { rowData, startRow } = await getCategoryGrid(month, "expense");
+    const normalizedCategory = category.trim().toLowerCase();
+
+    let categoryRowIndex = -1;
+    for (let index = 0; index < rowData.length; index++) {
+      const cellValue = rowData[index]?.values?.[0]?.formattedValue?.trim();
+      if (cellValue?.toLowerCase() === normalizedCategory) {
+        categoryRowIndex = startRow + index;
+        break;
+      }
+    }
+
+    if (categoryRowIndex === -1) {
+      throw new Error("Kategoria nie znaleziona");
+    }
+
+    const range = encodeURIComponent(
+      `${month}!C${categoryRowIndex}:E${categoryRowIndex}`
+    );
+    const url = `${BASE_URL}/${SPREADSHEET_ID}/values/${range}?valueRenderOption=UNFORMATTED_VALUE&key=${API_KEY}`;
+    const response = await axios.get(url, { signal });
+    const values: Array<string | number | null> =
+      response.data.values?.[0] ?? [];
+
+    return {
+      planned: normalizeAmountValue(values[0]),
+      actual: normalizeAmountValue(values[1]),
+      difference: normalizeAmountValue(values[2]),
+    };
+  } catch (error) {
+    console.error("Error fetching category budget status:", error);
     throw error;
   }
 }

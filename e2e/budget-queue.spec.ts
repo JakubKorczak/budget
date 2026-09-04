@@ -28,7 +28,8 @@ test("formularz jest gotowy na kolejny wydatek przed odpowiedzią Apps Script", 
 }) => {
   let snapshotRequests = 0;
   await context.route("https://sheets.googleapis.com/**", async (route) => {
-    if (!decodeURIComponent(route.request().url()).includes("/values/")) {
+    const url = decodeURIComponent(route.request().url());
+    if (!url.includes("/values/") && url.includes("!B58:")) {
       snapshotRequests += 1;
     }
     await route.fallback();
@@ -65,6 +66,19 @@ test("formularz jest gotowy na kolejny wydatek przed odpowiedzią Apps Script", 
   await expect(page.getByPlaceholder("0.00")).toHaveValue("");
   expect(snapshotRequests).toBe(1);
   releaseResponse?.();
+});
+
+test("po wyborze kategorii pokazuje realizację jej planu", async ({ page }) => {
+  await page.goto("/");
+  await selectEntry(page, "Wybierz kategorię...", "Zakupy");
+
+  const summary = page.getByRole("region", {
+    name: "Realizacja planu kategorii",
+  });
+  await expect(summary).toContainText("25%");
+  await expect(summary).toContainText("Plan1000,00 zł");
+  await expect(summary).toContainText("Wydano250,00 zł");
+  await expect(summary).toContainText("Pozostało 750,00 zł");
 });
 
 test("niezatwierdzony wydatek pozostaje w formularzu po odtworzeniu aplikacji", async ({
@@ -231,20 +245,33 @@ async function mockSheets(context: BrowserContext) {
       });
       return;
     }
+    if (/\/values\/[^?]+!C\d+:E\d+/.test(url)) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ values: [[1_000, 250, 750]] }),
+      });
+      return;
+    }
 
     const today = new Date();
     const month = MONTHS[today.getMonth()];
     const valueOffset = today.getDate() + 6;
+    const isExpenseCategoryGrid =
+      url.includes("ranges=") &&
+      url.includes("!B79:B257") &&
+      !url.includes("!B58:");
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
         sheets: [
           {
             properties: { title: month },
-            data: [
-              buildGrid(57, "Pensja", valueOffset),
-              buildGrid(78, "Zakupy", valueOffset),
-            ],
+            data: isExpenseCategoryGrid
+              ? [buildGrid(78, "Zakupy", 0)]
+              : [
+                  buildGrid(57, "Pensja", valueOffset),
+                  buildGrid(78, "Zakupy", valueOffset),
+                ],
           },
         ],
       }),
