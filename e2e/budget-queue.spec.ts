@@ -22,6 +22,30 @@ test.beforeEach(async ({ context }) => {
   await mockSheets(context);
 });
 
+test("dolna nawigacja wypełnia szerokość i przylega do dołu ekranu", async ({
+  page,
+}) => {
+  for (const viewport of [
+    { width: 393, height: 852 },
+    { width: 430, height: 932 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/");
+
+    const navigation = page.getByRole("navigation", {
+      name: "Główna nawigacja",
+    });
+    const box = await navigation.boundingBox();
+
+    expect(box).not.toBeNull();
+    expect(box?.x).toBe(0);
+    expect(box?.width).toBe(viewport.width);
+    expect(Math.round((box?.y ?? 0) + (box?.height ?? 0))).toBe(
+      viewport.height
+    );
+  }
+});
+
 test("formularz jest gotowy na kolejny wydatek przed odpowiedzią Apps Script", async ({
   context,
   page,

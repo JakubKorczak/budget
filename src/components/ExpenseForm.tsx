@@ -769,7 +769,7 @@ export function ExpenseForm({
   return (
     <>
       <Card className="w-full shadow-lg">
-        <CardHeader className="pb-4">
+        <CardHeader className="mb-3 pb-0">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="flex min-w-0 items-center gap-2 text-xl sm:text-2xl">
               {isSalary ? (
@@ -850,7 +850,7 @@ export function ExpenseForm({
             </div>
           )}
         </CardHeader>
-        <CardContent className="pt-4">
+        <CardContent>
           {errorMessage && (
             <div className="mb-4 rounded-r-lg border-l-4 border-red-500 bg-red-50 p-3 dark:bg-red-950/50">
               <div className="flex items-start">

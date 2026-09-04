@@ -166,34 +166,36 @@ function App() {
           </main>
           <nav
             aria-label="Główna nawigacja"
-            className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.625rem)] z-40 mx-auto flex max-w-[416px] gap-1 rounded-2xl border border-border/80 bg-background/95 p-1.5 shadow-2xl backdrop-blur"
+            className="budget-bottom-nav fixed inset-x-0 bottom-0 z-40 border-t border-border/80 bg-background/95 shadow-[0_-12px_32px_rgba(15,23,42,0.16)] backdrop-blur"
           >
-            <button
-              type="button"
-              aria-current={activeView === "entry" ? "page" : undefined}
-              onClick={() => setActiveView("entry")}
-              className={`flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
-                activeView === "entry"
-                  ? "bg-blue-600 text-white"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <PlusCircle className="size-5" />
-              Dodaj
-            </button>
-            <button
-              type="button"
-              aria-current={activeView === "month" ? "page" : undefined}
-              onClick={() => setActiveView("month")}
-              className={`flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
-                activeView === "month"
-                  ? "bg-blue-600 text-white"
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              }`}
-            >
-              <WalletCards className="size-5" />
-              Ten miesiąc
-            </button>
+            <div className="mx-auto flex w-full max-w-[440px] gap-1">
+              <button
+                type="button"
+                aria-current={activeView === "entry" ? "page" : undefined}
+                onClick={() => setActiveView("entry")}
+                className={`flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
+                  activeView === "entry"
+                    ? "bg-blue-600 text-white"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+              >
+                <PlusCircle className="size-5" />
+                Dodaj
+              </button>
+              <button
+                type="button"
+                aria-current={activeView === "month" ? "page" : undefined}
+                onClick={() => setActiveView("month")}
+                className={`flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
+                  activeView === "month"
+                    ? "bg-blue-600 text-white"
+                    : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                }`}
+              >
+                <WalletCards className="size-5" />
+                Ten miesiąc
+              </button>
+            </div>
           </nav>
         </div>
       </div>
