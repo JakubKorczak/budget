@@ -31,18 +31,49 @@ test("dolna nawigacja wypełnia szerokość i przylega do dołu ekranu", async (
   ]) {
     await page.setViewportSize(viewport);
     await page.goto("/");
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty("--sab", "34px");
+    });
 
     const navigation = page.getByRole("navigation", {
       name: "Główna nawigacja",
     });
+    const actions = navigation.locator(".budget-bottom-nav-actions");
+    const activeButton = navigation.getByRole("button", {
+      name: "Dodaj",
+      exact: true,
+    });
     const box = await navigation.boundingBox();
+    const actionsBox = await actions.boundingBox();
+    const buttonBox = await activeButton.boundingBox();
 
     expect(box).not.toBeNull();
+    expect(actionsBox).not.toBeNull();
+    expect(buttonBox).not.toBeNull();
     expect(box?.x).toBe(0);
     expect(box?.width).toBe(viewport.width);
     expect(Math.round((box?.y ?? 0) + (box?.height ?? 0))).toBe(
       viewport.height
     );
+    expect(Math.round((buttonBox?.y ?? 0) - (actionsBox?.y ?? 0))).toBe(6);
+    expect(
+      Math.round(
+        (actionsBox?.y ?? 0) +
+          (actionsBox?.height ?? 0) -
+          (buttonBox?.y ?? 0) -
+          (buttonBox?.height ?? 0)
+      )
+    ).toBe(6);
+    expect(buttonBox?.x).toBe(viewport.width < 420 ? 12 : 16);
+    expect(
+      Math.round(
+        (box?.y ?? 0) +
+          (box?.height ?? 0) -
+          (actionsBox?.y ?? 0) -
+          (actionsBox?.height ?? 0)
+      )
+    ).toBe(34);
+    await expect(navigation).toHaveCSS("background-color", "rgb(0, 0, 0)");
   }
 });
 

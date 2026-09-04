@@ -166,9 +166,9 @@ function App() {
           </main>
           <nav
             aria-label="Główna nawigacja"
-            className="budget-bottom-nav fixed inset-x-0 bottom-0 z-40 border-t border-border/80 bg-background/95 shadow-[0_-12px_32px_rgba(15,23,42,0.16)] backdrop-blur"
+            className="budget-bottom-nav fixed inset-x-0 bottom-0 z-40 border-t border-white/10 bg-black shadow-[0_-12px_32px_rgba(15,23,42,0.16)]"
           >
-            <div className="mx-auto flex w-full max-w-[440px] gap-1">
+            <div className="budget-bottom-nav-actions mx-auto flex w-full max-w-[440px] gap-1.5">
               <button
                 type="button"
                 aria-current={activeView === "entry" ? "page" : undefined}
