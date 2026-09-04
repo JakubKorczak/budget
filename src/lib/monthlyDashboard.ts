@@ -144,7 +144,7 @@ export function buildMonthlyDashboardModel(
     }
   }
 
-  const remaining = roundCurrency(snapshot.plannedExpenses - actualExpenses);
+  const remaining = roundCurrency(actualIncome - actualExpenses);
   const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
   const daysRemaining = Math.max(1, daysInMonth - now.getDate() + 1);
   const timeProgress = (now.getDate() / daysInMonth) * 100;

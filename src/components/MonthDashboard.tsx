@@ -265,7 +265,7 @@ export function MonthDashboard({
 
         <section className="rounded-2xl border border-border bg-muted/45 p-4" aria-labelledby="remaining-title">
           <p id="remaining-title" className="text-sm text-muted-foreground">
-            {model.remaining >= 0 ? "Zostało do wydania" : "Przekroczono plan o"}
+            {model.remaining >= 0 ? "Zostało do wydania" : "Wydano ponad przychody"}
           </p>
           <p className={model.remaining < 0 ? "mt-1 text-3xl font-bold tabular-nums text-red-600 dark:text-red-400" : "mt-1 text-3xl font-bold tabular-nums"}>
             {currencyFormatter.format(Math.abs(model.remaining))}

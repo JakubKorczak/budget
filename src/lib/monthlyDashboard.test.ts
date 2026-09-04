@@ -36,24 +36,24 @@ describe("monthly dashboard", () => {
     ]);
   });
 
-  it("calculates remaining budget, daily limit and pace", () => {
+  it("calculates remaining funds from actual income and expenses", () => {
     const model = buildMonthlyDashboardModel(
       snapshot(),
       [],
       new Date(2026, 8, 4, 12)
     );
 
-    expect(model.remaining).toBe(3_000);
+    expect(model.remaining).toBe(5_000);
     expect(model.daysRemaining).toBe(27);
-    expect(model.safeDaily).toBe(111.11);
+    expect(model.safeDaily).toBe(185.19);
     expect(model.timeProgress).toBeCloseTo(13.333);
     expect(model.spendingProgress).toBe(50);
     expect(model.paceState).toBe("warning");
   });
 
-  it("uses one day on the last day and never suggests spending after exceeding plan", () => {
+  it("uses one day on the last day and never suggests spending beyond actual income", () => {
     const source = snapshot();
-    source.actualExpenses = 6_500;
+    source.actualExpenses = 8_500;
     const model = buildMonthlyDashboardModel(
       source,
       [],
@@ -79,6 +79,7 @@ describe("monthly dashboard", () => {
 
     expect(model.actualIncome).toBe(8_500);
     expect(model.actualExpenses).toBe(3_200);
+    expect(model.remaining).toBe(5_300);
     expect(model.expenseRows.find((row) => row.label === "Zakupy")?.actual).toBe(700);
     expect(model.expenseRows.find((row) => row.label === "Dom")?.actual).toBe(4_300);
     expect(model.pendingCount).toBe(2);

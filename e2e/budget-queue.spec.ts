@@ -185,7 +185,7 @@ test("ekran miesiąca pokazuje podsumowanie i zachowuje szkic formularza", async
     name: "Podsumowanie bieżącego miesiąca",
   });
   await expect(dashboard).toContainText("Zostało do wydania");
-  await expect(dashboard).toContainText(/3\s?000,00\s*zł/);
+  await expect(dashboard).toContainText(/5\s?000,00\s*zł/);
   await expect(dashboard).toContainText("Nieplanowane wydatki");
   expect(dashboardRequests).toBeGreaterThanOrEqual(1);
   expect(dashboardRequests).toBeLessThanOrEqual(2);
