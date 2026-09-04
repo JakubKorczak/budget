@@ -73,11 +73,11 @@ body {
 }
 
 .budget-app-viewport-with-nav {
-  padding-bottom: calc(env(safe-area-inset-bottom) + 7rem);
+  padding-bottom: 7rem;
 }
 
 .budget-bottom-nav {
-  padding-bottom: var(--sab);
+  transform: translateY(var(--sab));
 }
 
 .budget-bottom-nav-actions {

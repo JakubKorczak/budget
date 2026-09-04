@@ -22,7 +22,7 @@ test.beforeEach(async ({ context }) => {
   await mockSheets(context);
 });
 
-test("dolna nawigacja wypełnia szerokość i przylega do dołu ekranu", async ({
+test("dolna nawigacja wypełnia szerokość i ignoruje dolny safe area", async ({
   page,
 }) => {
   for (const viewport of [
@@ -53,7 +53,7 @@ test("dolna nawigacja wypełnia szerokość i przylega do dołu ekranu", async (
     expect(box?.x).toBe(0);
     expect(box?.width).toBe(viewport.width);
     expect(Math.round((box?.y ?? 0) + (box?.height ?? 0))).toBe(
-      viewport.height
+      viewport.height + 34
     );
     expect(Math.round((buttonBox?.y ?? 0) - (actionsBox?.y ?? 0))).toBe(6);
     expect(
@@ -72,7 +72,7 @@ test("dolna nawigacja wypełnia szerokość i przylega do dołu ekranu", async (
           (actionsBox?.y ?? 0) -
           (actionsBox?.height ?? 0)
       )
-    ).toBe(34);
+    ).toBe(0);
     await expect(navigation).toHaveCSS("background-color", "rgb(0, 0, 0)");
 
     const outerCanvas = await page.evaluate(() => ({
