@@ -130,6 +130,16 @@ export async function getQueueProblems(): Promise<BudgetQueueRecord[]> {
     .sort((left, right) => left.createdAt - right.createdAt);
 }
 
+export async function getMonthlyBudgetQueueRecords(
+  month: string
+): Promise<BudgetQueueRecord[]> {
+  const database = await getBudgetDatabase();
+  const all = await database.getAll("queue");
+  return all
+    .filter((record) => record.month === month)
+    .sort((left, right) => left.createdAt - right.createdAt);
+}
+
 export async function getBudgetQueueSnapshot(): Promise<BudgetQueueSnapshot> {
   const database = await getBudgetDatabase();
   const all = await database.getAll("queue");

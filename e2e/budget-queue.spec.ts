@@ -81,6 +81,122 @@ test("po wyborze kategorii pokazuje realizację jej planu", async ({ page }) => 
   await expect(summary).toContainText("Pozostało 750,00 zł");
 });
 
+test("ekran miesiąca pokazuje podsumowanie i zachowuje szkic formularza", async ({
+  context,
+  page,
+}) => {
+  let dashboardRequests = 0;
+  await context.route("https://sheets.googleapis.com/**", async (route) => {
+    if (decodeURIComponent(route.request().url()).includes("/values:batchGet")) {
+      dashboardRequests += 1;
+    }
+    await route.fallback();
+  });
+
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: "Dodaj", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page"
+  );
+  await selectEntry(page, "Wybierz kategorię...", "Zakupy");
+  await page.getByPlaceholder("0.00").fill("120");
+
+  await page.getByRole("button", { name: "Ten miesiąc", exact: true }).click();
+  const dashboard = page.getByRole("region", {
+    name: "Podsumowanie bieżącego miesiąca",
+  });
+  await expect(dashboard).toContainText("Zostało do wydania");
+  await expect(dashboard).toContainText(/3\s?000,00\s*zł/);
+  await expect(dashboard).toContainText("Nieplanowane wydatki");
+  expect(dashboardRequests).toBeGreaterThanOrEqual(1);
+  expect(dashboardRequests).toBeLessThanOrEqual(2);
+
+  await page.getByRole("button", { name: "Dodaj", exact: true }).click();
+  await expect(page.getByPlaceholder("0.00")).toHaveValue("120");
+});
+
+test("dashboard czeka na czysty snapshot, aż aktywny zapis opuści kolejkę", async ({
+  context,
+  page,
+}) => {
+  let dashboardRequests = 0;
+  let releaseResponse: (() => void) | undefined;
+  const responseGate = new Promise<void>((resolve) => {
+    releaseResponse = resolve;
+  });
+
+  await context.route("https://sheets.googleapis.com/**", async (route) => {
+    if (decodeURIComponent(route.request().url()).includes("/values:batchGet")) {
+      dashboardRequests += 1;
+    }
+    await route.fallback();
+  });
+  await context.route("**/test-apps-script*", async (route) => {
+    const payload = JSON.parse(route.request().postData() || "{}") as {
+      commands: Array<{ commandId: string; desired: unknown }>;
+    };
+    await responseGate;
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        success: true,
+        results: payload.commands.map((command) => ({
+          commandId: command.commandId,
+          status: "applied",
+          current: command.desired,
+        })),
+      }),
+    });
+  });
+
+  await page.goto("/");
+  await selectEntry(page, "Wybierz kategorię...", "Zakupy");
+  await page.getByPlaceholder("0.00").fill("120");
+  await page.getByRole("button", { name: "Zapisz wydatek" }).click();
+  await page.getByRole("button", { name: "Ten miesiąc", exact: true }).click();
+
+  await expect(page.getByText("Oczekiwanie na synchronizację wpisów...")).toBeVisible();
+  await page.waitForTimeout(250);
+  expect(dashboardRequests).toBe(0);
+
+  releaseResponse?.();
+  await expect(
+    page.getByRole("region", { name: "Podsumowanie bieżącego miesiąca" })
+  ).toBeVisible();
+  await expect.poll(() => dashboardRequests).toBeGreaterThanOrEqual(1);
+});
+
+test("pull-to-refresh nie przechwytuje gestu poniżej góry ekranu", async ({
+  context,
+  page,
+}) => {
+  let dashboardRequests = 0;
+  await context.route("https://sheets.googleapis.com/**", async (route) => {
+    if (decodeURIComponent(route.request().url()).includes("/values:batchGet")) {
+      dashboardRequests += 1;
+    }
+    await route.fallback();
+  });
+
+  await page.setViewportSize({ width: 390, height: 600 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Ten miesiąc", exact: true }).click();
+  await expect(
+    page.getByRole("region", { name: "Podsumowanie bieżącego miesiąca" })
+  ).toBeVisible();
+  await expect(page.getByRole("button", { name: "Odśwież podsumowanie" })).toBeEnabled();
+
+  const requestsBeforeGesture = dashboardRequests;
+  const movePreventedBelowTop = await dispatchPullGesture(page, 200, 100, 210);
+  expect(movePreventedBelowTop).toBe(false);
+  await page.waitForTimeout(250);
+  expect(dashboardRequests).toBe(requestsBeforeGesture);
+
+  const movePreventedAtTop = await dispatchPullGesture(page, 0, 100, 210);
+  expect(movePreventedAtTop).toBe(true);
+  await expect.poll(() => dashboardRequests).toBe(requestsBeforeGesture + 1);
+});
+
 test("niezatwierdzony wydatek pozostaje w formularzu po odtworzeniu aplikacji", async ({
   page,
 }) => {
@@ -226,9 +342,66 @@ async function selectEntry(
   await page.getByRole("button", { name: entryName }).click();
 }
 
+async function dispatchPullGesture(
+  page: import("@playwright/test").Page,
+  scrollTop: number,
+  startY: number,
+  endY: number
+): Promise<boolean> {
+  return page.evaluate(
+    ({ scrollTop, startY, endY }) => {
+      const shell = document.querySelector<HTMLElement>(".budget-app-shell");
+      if (!shell) throw new Error("Brak kontenera przewijania aplikacji");
+      shell.scrollTop = scrollTop;
+
+      const start = new Event("touchstart", { bubbles: true, cancelable: true });
+      Object.defineProperty(start, "touches", { value: [{ clientY: startY }] });
+      window.dispatchEvent(start);
+
+      const move = new Event("touchmove", { bubbles: true, cancelable: true });
+      Object.defineProperty(move, "touches", { value: [{ clientY: endY }] });
+      window.dispatchEvent(move);
+      window.dispatchEvent(
+        new Event("touchend", { bubbles: true, cancelable: true })
+      );
+      return move.defaultPrevented;
+    },
+    { scrollTop, startY, endY }
+  );
+}
+
 async function mockSheets(context: BrowserContext) {
   await context.route("https://sheets.googleapis.com/**", async (route: Route) => {
     const url = decodeURIComponent(route.request().url());
+    if (url.includes("/values:batchGet")) {
+      const month = MONTHS[new Date().getMonth()];
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          valueRanges: [
+            { range: `${month}!D2`, values: [[`${month} 2026`]] },
+            {
+              range: `${month}!B54:E70`,
+              values: [["SUMA:", 10_000, 8_000, -2_000]],
+            },
+            {
+              range: `${month}!B76:E257`,
+              values: [
+                ["Kategoria", "Planowane", "Rzeczywiste", "Różnica"],
+                ["SUMA:", 6_000, 3_000, 3_000],
+                ["Dom", 4_000, 4_100, -100],
+                ["Zakupy", 0, 500, -500],
+              ],
+            },
+            {
+              range: "Wzorzec kategorii!B34:B213",
+              values: [["nazwa kategorii"], ["Dom"], ["Zakupy"]],
+            },
+          ],
+        }),
+      });
+      return;
+    }
     if (url.includes("/values/Wzorzec kategorii!")) {
       await route.fulfill({
         contentType: "application/json",

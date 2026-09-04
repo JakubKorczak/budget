@@ -1,5 +1,9 @@
 import axios from "axios";
 import type { CategoryBudgetAmounts } from "@/lib/categoryBudget";
+import {
+  parseMonthlyDashboardSnapshot,
+  type MonthlyDashboardSnapshot,
+} from "@/lib/monthlyDashboard";
 import type { Category } from "@/types/expense";
 import { MONTHS } from "@/types/expense";
 import {
@@ -80,6 +84,7 @@ const CATEGORY_CACHE_TTL = 1000 * 60 * 60 * 24; // 24h
 
 const DAY_AMOUNTS_CACHE_PREFIX = "budget:day-amounts";
 const DAY_AMOUNTS_CACHE_TTL = 1000 * 60 * 60 * 6; // 6 godzin
+const MONTH_DASHBOARD_CACHE_PREFIX = "budget:month-dashboard:v1";
 
 function isValidCategoryCache(data: Category[] | null | undefined): boolean {
   if (!Array.isArray(data) || data.length === 0) {
@@ -489,6 +494,91 @@ export function incrementDayAmountCache(
     formula: null,
   };
   writeDayAmountsCache(month, day, nextData, entryType);
+}
+
+function buildMonthlyDashboardCacheKey(month: string): string {
+  return `${MONTH_DASHBOARD_CACHE_PREFIX}:${new Date().getFullYear()}:${month}`;
+}
+
+export function getCachedMonthlyDashboardSnapshot(
+  month: string
+): MonthlyDashboardSnapshot | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const payload = window.localStorage.getItem(buildMonthlyDashboardCacheKey(month));
+    if (!payload) return null;
+    const parsed = JSON.parse(payload) as MonthlyDashboardSnapshot;
+    if (
+      parsed?.month !== month ||
+      typeof parsed.fetchedAt !== "number" ||
+      !Array.isArray(parsed.expenseRows)
+    ) {
+      window.localStorage.removeItem(buildMonthlyDashboardCacheKey(month));
+      return null;
+    }
+    return parsed;
+  } catch (error) {
+    console.warn("[Sheets] Nie udało się odczytać podsumowania miesiąca", error);
+    return null;
+  }
+}
+
+function writeMonthlyDashboardSnapshot(snapshot: MonthlyDashboardSnapshot): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      buildMonthlyDashboardCacheKey(snapshot.month),
+      JSON.stringify(snapshot)
+    );
+  } catch (error) {
+    console.warn("[Sheets] Nie udało się zapisać podsumowania miesiąca", error);
+  }
+}
+
+export async function getMonthlyDashboard(
+  month: string,
+  signal?: AbortSignal,
+  options?: { forceRefresh?: boolean }
+): Promise<MonthlyDashboardSnapshot> {
+  const params = new URLSearchParams({
+    key: API_KEY,
+    valueRenderOption: "UNFORMATTED_VALUE",
+  });
+  [
+    `${month}!D2`,
+    `${month}!B54:E70`,
+    `${month}!B76:E257`,
+    "Wzorzec kategorii!B34:B213",
+  ].forEach((range) => params.append("ranges", range));
+
+  try {
+    const response = await axios.get(
+      `${BASE_URL}/${SPREADSHEET_ID}/values:batchGet?${params}`,
+      {
+        signal,
+        headers: options?.forceRefresh ? { "Cache-Control": "no-cache" } : undefined,
+      }
+    );
+    const valueRanges: Array<{ values?: unknown[][] }> =
+      response.data.valueRanges ?? [];
+    const snapshot = parseMonthlyDashboardSnapshot({
+      month,
+      periodLabel:
+        String(valueRanges[0]?.values?.[0]?.[0] ?? "").trim() ||
+        `${month} ${new Date().getFullYear()}`,
+      incomeValues: valueRanges[1]?.values ?? [],
+      expenseValues: valueRanges[2]?.values ?? [],
+      categoryValues: valueRanges[3]?.values ?? [],
+    });
+    writeMonthlyDashboardSnapshot(snapshot);
+    return snapshot;
+  } catch (error) {
+    const cached = getCachedMonthlyDashboardSnapshot(month);
+    if (cached && (typeof navigator === "undefined" || !navigator.onLine)) {
+      return cached;
+    }
+    throw error;
+  }
 }
 
 /**

@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import { createPortal } from "react-dom";
 
 import { cn } from "@/lib/utils";
@@ -68,7 +75,6 @@ import {
   enqueueBudgetEntry,
   overwriteBudgetQueueConflict,
   retryBudgetQueueRecord,
-  subscribeBudgetQueue,
   type BudgetQueueSnapshot,
 } from "@/services/budgetQueue";
 import {
@@ -79,6 +85,7 @@ import { MONTHS, type Category } from "@/types/expense";
 import { CategoryCombobox } from "@/components/CategoryCombobox";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import type { AppTheme } from "@/lib/theme";
+import { usePullToRefresh } from "@/lib/usePullToRefresh";
 import {
   clearBudgetEntryDraft,
   readBudgetEntryDraft,
@@ -127,72 +134,6 @@ function usePreventPullToRefresh(isActive: boolean) {
       root.style.touchAction = previousTouchAction;
     };
   }, [isActive]);
-}
-
-function usePullToRefresh(
-  handler: () => void | Promise<void>,
-  enabled: boolean,
-  threshold = 80
-) {
-  useEffect(() => {
-    if (!enabled || typeof window === "undefined") {
-      return;
-    }
-
-    let startY = 0;
-    let currentY = 0;
-    let isPulling = false;
-    let isExecuting = false;
-
-    const handleTouchStart = (event: TouchEvent) => {
-      if (window.scrollY > 0 || isExecuting) {
-        return;
-      }
-      startY = event.touches[0]?.clientY ?? 0;
-      currentY = startY;
-      isPulling = true;
-    };
-
-    const handleTouchMove = (event: TouchEvent) => {
-      if (!isPulling || isExecuting) {
-        return;
-      }
-      currentY = event.touches[0]?.clientY ?? 0;
-      const delta = currentY - startY;
-      if (delta > 0 && window.scrollY <= 0) {
-        event.preventDefault();
-      }
-    };
-
-    const handleTouchEnd = () => {
-      if (!isPulling || isExecuting) {
-        isPulling = false;
-        return;
-      }
-
-      const delta = currentY - startY;
-      isPulling = false;
-
-      if (delta < threshold || window.scrollY > 0) {
-        return;
-      }
-
-      isExecuting = true;
-      Promise.resolve(handler()).finally(() => {
-        isExecuting = false;
-      });
-    };
-
-    window.addEventListener("touchstart", handleTouchStart, { passive: true });
-    window.addEventListener("touchmove", handleTouchMove, { passive: false });
-    window.addEventListener("touchend", handleTouchEnd);
-
-    return () => {
-      window.removeEventListener("touchstart", handleTouchStart);
-      window.removeEventListener("touchmove", handleTouchMove);
-      window.removeEventListener("touchend", handleTouchEnd);
-    };
-  }, [enabled, handler, threshold]);
 }
 
 type CalculatorRibbonProps = {
@@ -255,6 +196,8 @@ type ExpenseFormProps = {
   onEntryTypeToggle: () => void;
   theme: AppTheme;
   onThemeToggle: () => void;
+  queueSnapshot: BudgetQueueSnapshot;
+  scrollContainerRef: RefObject<HTMLElement | null>;
 };
 
 export function ExpenseForm({
@@ -262,6 +205,8 @@ export function ExpenseForm({
   onEntryTypeToggle,
   theme,
   onThemeToggle,
+  queueSnapshot,
+  scrollContainerRef,
 }: ExpenseFormProps) {
   const [initialDraft] = useState(() => readBudgetEntryDraft(entryType));
   const [isLoadingAmount, setIsLoadingAmount] = useState(false);
@@ -274,12 +219,6 @@ export function ExpenseForm({
   const [isIosDevice, setIsIosDevice] = useState(false);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [isEnqueueing, setIsEnqueueing] = useState(false);
-  const [queueSnapshot, setQueueSnapshot] = useState<BudgetQueueSnapshot>({
-    pending: 0,
-    syncing: 0,
-    problems: [],
-    offline: typeof navigator !== "undefined" && !navigator.onLine,
-  });
   const [selectedMonth, setSelectedMonth] = useState(
     () => initialDraft?.month ?? getCurrentMonth()
   );
@@ -294,14 +233,9 @@ export function ExpenseForm({
   const loadedCellBaseRef = useRef<CanonicalCellValue | null>(null);
   const userEditedPriceRef = useRef(Boolean(initialDraft?.price));
 
-  useEffect(
-    () =>
-      subscribeBudgetQueue((snapshot) => {
-        setQueueSnapshot(snapshot);
-        setDayCacheVersion((version) => version + 1);
-      }),
-    []
-  );
+  useEffect(() => {
+    setDayCacheVersion((version) => version + 1);
+  }, [queueSnapshot]);
 
   const cachedCategories = useMemo(
     () =>
@@ -653,7 +587,8 @@ export function ExpenseForm({
     !isCategoryPickerOpen &&
       !isDayPickerOpen &&
       !isMonthPickerOpen &&
-      !isEnqueueing
+      !isEnqueueing,
+    scrollContainerRef
   );
 
   const onSubmit = useCallback(

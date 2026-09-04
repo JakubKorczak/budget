@@ -1,13 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster, toast } from "sonner";
+import { PlusCircle, WalletCards } from "lucide-react";
 import "./App.css";
 
 import { ExpenseForm } from "./components/ExpenseForm";
 import { Login } from "./components/Login";
+import { MonthDashboard } from "./components/MonthDashboard";
 import { ThemeToggle } from "./components/ThemeToggle";
 import type { BudgetEntryType } from "./services/googleSheets";
-import { startBudgetQueueSync } from "./services/budgetQueue";
+import {
+  startBudgetQueueSync,
+  subscribeBudgetQueue,
+  type BudgetQueueSnapshot,
+} from "./services/budgetQueue";
 import {
   applyTheme,
   getPreferredTheme,
@@ -19,6 +25,12 @@ import {
 // Hasło można zmienić w pliku .env
 const CORRECT_PASSWORD = import.meta.env.VITE_APP_PASSWORD || "budżet2025";
 const SESSION_KEY = "budget_app_session";
+const EMPTY_QUEUE_SNAPSHOT: BudgetQueueSnapshot = {
+  pending: 0,
+  syncing: 0,
+  problems: [],
+  offline: typeof navigator !== "undefined" && !navigator.onLine,
+};
 
 // Konfiguracja React Query
 const queryClient = new QueryClient({
@@ -33,6 +45,11 @@ const queryClient = new QueryClient({
 function App() {
   const [theme, setTheme] = useState<AppTheme>(getPreferredTheme);
   const [entryType, setEntryType] = useState<BudgetEntryType>("expense");
+  const [activeView, setActiveView] = useState<"entry" | "month">("entry");
+  const [queueSnapshot, setQueueSnapshot] = useState<BudgetQueueSnapshot>(
+    EMPTY_QUEUE_SNAPSHOT
+  );
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Inicjalizuj state na podstawie localStorage
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
@@ -49,6 +66,11 @@ function App() {
       return;
     }
     return startBudgetQueueSync();
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    return subscribeBudgetQueue(setQueueSnapshot);
   }, [isAuthenticated]);
 
   useEffect(() => {
@@ -116,17 +138,63 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Toaster position="bottom-center" richColors theme={theme} />
-      <div className="budget-app-shell h-full overflow-y-auto bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50 text-foreground transition-colors dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950">
-        <div className="budget-app-viewport mx-auto w-full max-w-[440px]">
+      <div
+        ref={scrollContainerRef}
+        className="budget-app-shell h-full overflow-y-auto bg-linear-to-br from-blue-50 via-indigo-50 to-purple-50 text-foreground transition-colors dark:from-slate-950 dark:via-slate-900 dark:to-indigo-950"
+      >
+        <div className="budget-app-viewport budget-app-viewport-with-nav mx-auto w-full max-w-[440px]">
           <main className="w-full">
-            <ExpenseForm
-              key={entryType}
-              entryType={entryType}
-              onEntryTypeToggle={handleEntryTypeToggle}
-              theme={theme}
-              onThemeToggle={handleThemeToggle}
-            />
+            {activeView === "entry" ? (
+              <ExpenseForm
+                key={entryType}
+                entryType={entryType}
+                onEntryTypeToggle={handleEntryTypeToggle}
+                theme={theme}
+                onThemeToggle={handleThemeToggle}
+                queueSnapshot={queueSnapshot}
+                scrollContainerRef={scrollContainerRef}
+              />
+            ) : (
+              <MonthDashboard
+                theme={theme}
+                onThemeToggle={handleThemeToggle}
+                queueSnapshot={queueSnapshot}
+                onOpenEntries={() => setActiveView("entry")}
+                scrollContainerRef={scrollContainerRef}
+              />
+            )}
           </main>
+          <nav
+            aria-label="Główna nawigacja"
+            className="fixed inset-x-3 bottom-[calc(env(safe-area-inset-bottom)+0.625rem)] z-40 mx-auto flex max-w-[416px] gap-1 rounded-2xl border border-border/80 bg-background/95 p-1.5 shadow-2xl backdrop-blur"
+          >
+            <button
+              type="button"
+              aria-current={activeView === "entry" ? "page" : undefined}
+              onClick={() => setActiveView("entry")}
+              className={`flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
+                activeView === "entry"
+                  ? "bg-blue-600 text-white"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              <PlusCircle className="size-5" />
+              Dodaj
+            </button>
+            <button
+              type="button"
+              aria-current={activeView === "month" ? "page" : undefined}
+              onClick={() => setActiveView("month")}
+              className={`flex min-h-12 flex-1 items-center justify-center gap-2 rounded-xl px-3 text-sm font-semibold transition-colors ${
+                activeView === "month"
+                  ? "bg-blue-600 text-white"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
+            >
+              <WalletCards className="size-5" />
+              Ten miesiąc
+            </button>
+          </nav>
         </div>
       </div>
     </QueryClientProvider>
